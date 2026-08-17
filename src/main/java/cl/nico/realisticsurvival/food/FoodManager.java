@@ -15,6 +15,7 @@ import org.bukkit.plugin.Plugin;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -101,12 +102,30 @@ public final class FoodManager {
     private final NamespacedKey keyLastCalcDay;
     private final NamespacedKey keyFrozen;
     private final NamespacedKey keyThawStartDay;
+    private final NamespacedKey keyDebugRawX100;
+
+    /**
+     * Interruptor global de diagnostico (ver {@link #setDebugLoreEnabled}): agrega una
+     * linea extra de Lore con el valor "crudo" (antes de redondear a la decena) de la
+     * ultima operacion que toco la frescura del item — util para verificar un merge o un
+     * catch-up sospechoso. Apagado por defecto.
+     */
+    private boolean debugLoreEnabled = false;
 
     public FoodManager(Plugin plugin) {
         this.keyFreshness = new NamespacedKey(plugin, "freshness");
         this.keyLastCalcDay = new NamespacedKey(plugin, "last_calc_day");
         this.keyFrozen = new NamespacedKey(plugin, "frozen");
         this.keyThawStartDay = new NamespacedKey(plugin, "thaw_start_day");
+        this.keyDebugRawX100 = new NamespacedKey(plugin, "debug_raw_freshness_x100");
+    }
+
+    public void setDebugLoreEnabled(boolean enabled) {
+        this.debugLoreEnabled = enabled;
+    }
+
+    public boolean isDebugLoreEnabled() {
+        return debugLoreEnabled;
     }
 
     /**
@@ -213,9 +232,10 @@ public final class FoodManager {
 
         double ratePerDay = 100.0 / totalDecayDays(item.getType());
         double raw = stored - (elapsedDays * ratePerDay / storageMultiplier);
-        int rounded = roundToNearestTen(Math.max(0.0, Math.min(100.0, raw)));
+        double clampedRaw = Math.max(0.0, Math.min(100.0, raw));
+        int rounded = roundToNearestTen(clampedRaw);
 
-        applyFreshness(item, rounded, currentDay);
+        applyFreshness(item, rounded, currentDay, Math.round(clampedRaw * 100));
         return rounded;
     }
 
@@ -253,6 +273,19 @@ public final class FoodManager {
      * cuando corresponda (ver {@link #calculateFreshness}).
      */
     public void applyFreshness(ItemStack item, int freshness, long currentDay) {
+        applyFreshness(item, freshness, currentDay, roundToNearestTen(freshness) * 100L);
+    }
+
+    /**
+     * Igual que {@link #applyFreshness(ItemStack, int, long)}, pero ademas recibe el valor
+     * "crudo" (antes de redondear a la decena) como entero de punto fijo multiplicado por
+     * 100 — ej. 74.93% se pasa como {@code 7493} — para guardarlo como dato de diagnostico
+     * (nunca se persiste un decimal real, solo un entero escalado; ver {@link #setDebugLoreEnabled}).
+     * Los llamadores que ya conocen el valor crudo de su propio calculo (catch-up, merge de
+     * stacks) deben usar este overload en vez del de 3 argumentos para que el Lore de debug
+     * sea preciso.
+     */
+    public void applyFreshness(ItemStack item, int freshness, long currentDay, long rawTimes100) {
         int clamped = Math.max(0, Math.min(100, roundToNearestTen(freshness)));
         boolean frozen = isFrozen(item);
 
@@ -260,7 +293,8 @@ public final class FoodManager {
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(keyFreshness, PersistentDataType.INTEGER, clamped);
             pdc.set(keyLastCalcDay, PersistentDataType.LONG, currentDay);
-            meta.lore(buildFreshnessLore(clamped, frozen));
+            pdc.set(keyDebugRawX100, PersistentDataType.LONG, rawTimes100);
+            meta.lore(buildFreshnessLore(clamped, frozen, rawTimes100));
         });
 
         if (clamped <= 0) {
@@ -275,12 +309,12 @@ public final class FoodManager {
     }
 
     /**
-     * Construye el Lore de frescura/congelado. Centralizado aca para que
-     * {@link #applyFreshness} y {@link #setFrozen} (que puede cambiar el estado congelado
-     * sin pasar por applyFreshness, ver la rama "enteringFreezer" de
+     * Construye el Lore de frescura/congelado (+ linea de debug opcional). Centralizado aca
+     * para que {@link #applyFreshness} y {@link #setFrozen} (que puede cambiar el estado
+     * congelado sin pasar por applyFreshness, ver la rama "enteringFreezer" de
      * {@link #calculateFreshness}) siempre muestren texto consistente.
      */
-    private List<Component> buildFreshnessLore(int freshness, boolean frozen) {
+    private List<Component> buildFreshnessLore(int freshness, boolean frozen, long rawTimes100) {
         SpoilageTier tier = getTier(freshness);
         NamedTextColor color = switch (tier) {
             case FRESCO -> NamedTextColor.GREEN;
@@ -300,6 +334,15 @@ public final class FoodManager {
                 .decoration(TextDecoration.ITALIC, false));
         if (frozen) {
             lore.add(Component.text("❄ Congelado", NamedTextColor.AQUA)
+                    .decoration(TextDecoration.ITALIC, false));
+        }
+        if (debugLoreEnabled) {
+            // Formateo con division/modulo entero (rawTimes100 / 100 y % 100), no con
+            // String.format("%.2f", double): el "decimal" es solo cosmetico al mostrarlo,
+            // el dato en si nunca deja de ser un entero escalado.
+            long whole = rawTimes100 / 100;
+            long fraction = Math.abs(rawTimes100 % 100);
+            lore.add(Component.text(String.format(Locale.ROOT, "[debug] raw: %d.%02d%%", whole, fraction), NamedTextColor.GRAY)
                     .decoration(TextDecoration.ITALIC, false));
         }
         return lore;
@@ -326,7 +369,7 @@ public final class FoodManager {
         rotten.editMeta(meta -> {
             meta.displayName(Component.text("Restos Podridos", NamedTextColor.DARK_GRAY)
                     .decoration(TextDecoration.ITALIC, false));
-            meta.lore(buildFreshnessLore(0, false));
+            meta.lore(buildFreshnessLore(0, false, 0L));
             meta.getPersistentDataContainer().set(keyFreshness, PersistentDataType.INTEGER, 0);
         });
         return rotten;
@@ -354,7 +397,8 @@ public final class FoodManager {
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(keyFrozen, PersistentDataType.BOOLEAN, frozen);
             int freshness = pdc.getOrDefault(keyFreshness, PersistentDataType.INTEGER, 100);
-            meta.lore(buildFreshnessLore(freshness, frozen));
+            long rawTimes100 = pdc.getOrDefault(keyDebugRawX100, PersistentDataType.LONG, freshness * 100L);
+            meta.lore(buildFreshnessLore(freshness, frozen, rawTimes100));
         });
     }
 

@@ -166,12 +166,16 @@ public final class InventoryListener implements Listener {
 
         double weighted = ((double) amountA * freshnessA + (double) amountB * freshnessB) / totalAmount;
         int newFreshness = foodManager.roundToNearestTen(weighted);
+        // Valor crudo (antes de redondear) como entero de punto fijo x100, solo para el
+        // Lore de debug de FoodManager — ej. 74.9275% se guarda como 7493 (redondeado al
+        // centesimo), nunca como decimal real.
+        long rawTimes100 = Math.round(weighted * 100);
 
         ItemStack merged = a.clone();
         int maxStack = merged.getMaxStackSize();
         int slotAmount = Math.min(totalAmount, maxStack);
         merged.setAmount(slotAmount);
-        foodManager.applyFreshness(merged, newFreshness, currentDay);
+        foodManager.applyFreshness(merged, newFreshness, currentDay, rawTimes100);
         if (foodManager.getTier(newFreshness) == FoodManager.SpoilageTier.PODRIDO) {
             // ItemStack#setType esta deprecado: transformToRotten devuelve una referencia
             // nueva en vez de mutar "merged" in-place, hay que recapturarla.

@@ -29,6 +29,10 @@ import java.util.Locale;
  *     <li>{@code /rsdebug setfrozen <true|false>} — fuerza el flag congelado del item en mano.</li>
  *     <li>{@code /rsdebug currentday} — muestra el dia in-game absoluto actual (segun RS),
  *         para verificar si el calendario esta avanzando durante una sesion de prueba.</li>
+ *     <li>{@code /rsdebug lore <true|false>} — activa/desactiva (global, todo el servidor)
+ *         una linea extra de Lore con el valor "crudo" (antes de redondear a la decena) de
+ *         la ultima operacion que toco cada item — util para verificar un merge sospechoso
+ *         sin adivinar si el redondeo esta ocultando algo.</li>
  * </ul>
  */
 public final class RSDebugCommand implements CommandExecutor, TabCompleter {
@@ -50,6 +54,11 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
 
         if (args[0].equalsIgnoreCase("currentday")) {
             currentDay(sender);
+            return true;
+        }
+
+        if (args[0].equalsIgnoreCase("lore")) {
+            toggleDebugLore(sender, args);
             return true;
         }
 
@@ -79,8 +88,27 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
 
     private Component usage() {
         return Component.text(
-                "Uso: /rsdebug setfreshness <0-100> | /rsdebug setfrozen <true|false> | /rsdebug currentday",
+                "Uso: /rsdebug setfreshness <0-100> | setfrozen <true|false> | currentday | lore <true|false>",
                 NamedTextColor.YELLOW);
+    }
+
+    /**
+     * Activa/desactiva globalmente la linea de debug ("[debug] raw: 74.93%") en el Lore de
+     * todos los alimentos gestionados por el plugin. Es un toggle de servidor, no por
+     * jugador — items ya calculados antes de activar el toggle no se actualizan
+     * retroactivamente hasta la proxima vez que se recalculen (consumir, click, merge, etc).
+     */
+    private void toggleDebugLore(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(Component.text("Uso: /rsdebug lore <true|false>", NamedTextColor.YELLOW));
+            return;
+        }
+        boolean enabled = Boolean.parseBoolean(args[1]);
+        foodManager.setDebugLoreEnabled(enabled);
+        sender.sendMessage(Component.text(
+                "Lore de debug (valor crudo antes de redondear): " + enabled
+                        + ". Los items ya calculados se actualizan recien en su proxima interaccion.",
+                NamedTextColor.GREEN));
     }
 
     /**
@@ -126,12 +154,12 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 1) {
-            return List.of("setfreshness", "setfrozen", "currentday");
+            return List.of("setfreshness", "setfrozen", "currentday", "lore");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("setfreshness")) {
             return List.of("0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100");
         }
-        if (args.length == 2 && args[0].equalsIgnoreCase("setfrozen")) {
+        if (args.length == 2 && (args[0].equalsIgnoreCase("setfrozen") || args[0].equalsIgnoreCase("lore"))) {
             return List.of("true", "false");
         }
         return List.of();
