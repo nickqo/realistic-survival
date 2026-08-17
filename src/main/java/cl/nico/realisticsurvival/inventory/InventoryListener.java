@@ -3,6 +3,8 @@ package cl.nico.realisticsurvival.inventory;
 import cl.nico.realisticsurvival.api.time.TimeProvider;
 import cl.nico.realisticsurvival.appliances.ApplianceGUI;
 import cl.nico.realisticsurvival.food.FoodManager;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -13,6 +15,7 @@ import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
 
 /**
  * Listener puro encargado del "stacking" (fusion) de alimentos con distinta frescura.
@@ -37,11 +40,13 @@ import org.bukkit.inventory.ItemStack;
  */
 public final class InventoryListener implements Listener {
 
+    private final Plugin plugin;
     private final FoodManager foodManager;
     private final TimeProvider timeProvider;
     private final ApplianceGUI applianceGUI;
 
-    public InventoryListener(FoodManager foodManager, TimeProvider timeProvider, ApplianceGUI applianceGUI) {
+    public InventoryListener(Plugin plugin, FoodManager foodManager, TimeProvider timeProvider, ApplianceGUI applianceGUI) {
+        this.plugin = plugin;
         this.foodManager = foodManager;
         this.timeProvider = timeProvider;
         this.applianceGUI = applianceGUI;
@@ -77,7 +82,19 @@ public final class InventoryListener implements Listener {
         ItemStack[] merged = mergeStacks(current, cursor, currentDay);
 
         event.setCurrentItem(merged[0]);
-        event.getWhoClicked().setItemOnCursor(merged[1]);
+
+        // IMPORTANTE: ni event.setCursor() (deprecado desde Bukkit 1.5.2, documentado como
+        // causante de estas mismas inconsistencias) ni getWhoClicked().setItemOnCursor()
+        // llamados DENTRO del handler son confiables aca: con el evento cancelado, Bukkit
+        // resincroniza el cursor del cliente usando el valor ORIGINAL trackeado por el
+        // propio evento despues de que este handler termina, pisando cualquier cambio de
+        // cursor hecho en el mismo tick — devolviendo el item original del slot al cursor
+        // (bug de duplicacion real: terminabas con el slot fusionado Y el cursor con una
+        // copia extra del original). La forma correcta, documentada por Paper, es cancelar
+        // el evento y aplicar el cambio de cursor en el tick siguiente via el scheduler.
+        HumanEntity clicker = event.getWhoClicked();
+        ItemStack newCursor = merged[1];
+        Bukkit.getScheduler().runTask(plugin, () -> clicker.setItemOnCursor(newCursor));
     }
 
     /**

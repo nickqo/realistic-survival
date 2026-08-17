@@ -59,7 +59,7 @@ public final class RealisticSurvival extends JavaPlugin {
         WateringManager wateringManager = new WateringManager(this, timeProvider);
 
         // --- inventory ---
-        InventoryListener inventoryListener = new InventoryListener(foodManager, timeProvider, applianceGUI);
+        InventoryListener inventoryListener = new InventoryListener(this, foodManager, timeProvider, applianceGUI);
 
         // --- listeners ---
         PluginManager pluginManager = getServer().getPluginManager();

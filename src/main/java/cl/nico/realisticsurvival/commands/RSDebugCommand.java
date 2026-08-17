@@ -5,6 +5,7 @@ import cl.nico.realisticsurvival.food.FoodManager;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -75,6 +76,12 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
         ItemStack inHand = player.getInventory().getItemInMainHand();
         if (!foodManager.isTrackable(inHand) && !foodManager.isTracked(inHand)) {
             sender.sendMessage(Component.text("El item en tu mano no es un alimento gestionado por el plugin.", NamedTextColor.RED));
+            return true;
+        }
+        if (inHand.getType() == Material.ROTTEN_FLESH) {
+            // Podrido (0%) es un estado terminal: no tiene sentido "resetear" su frescura
+            // o su flag congelado — para probar un alimento fresco de nuevo, usa otro item.
+            sender.sendMessage(Component.text("Restos Podridos es un estado terminal, no se puede modificar.", NamedTextColor.RED));
             return true;
         }
 
