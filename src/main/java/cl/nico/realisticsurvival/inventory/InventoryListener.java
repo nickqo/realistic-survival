@@ -30,13 +30,23 @@ import org.bukkit.plugin.Plugin;
  * <p>
  * <b>Catch-up fuera de merges:</b> ademas de los merges, esta clase recalcula la frescura
  * de cualquier alimento tocado por un click, recogido del suelo, o presente al conectarse
- * o al abrir CUALQUIER inventario (el propio, un cofre, un barril, etc. — ver
+ * o al abrir CUALQUIER inventario ajeno al del jugador (un cofre, un barril, etc. — ver
  * {@link #onInventoryOpen}). Esto evita que un alimento quede "viejo" (sin recalcular)
  * durante mucho tiempo real: si eso pasara y despues se metiera a un electrodomestico, el
  * backlog acumulado se cobraria de golpe en el proximo catch-up (bug real, ver
  * {@code appliances.CatchUpProcessor}). Un item dado por comando ({@code /give}) y jamas
  * tocado (ni un click, ni un inventario abierto, ni recogido del suelo) puede seguir sin
  * etiquetar hasta la primera interaccion real — limitacion conocida del enfoque perezoso.
+ * <p>
+ * <b>Excepcion documentada al "cero ticking activo":</b> Bukkit NO dispara ningun evento
+ * de servidor cuando un jugador abre su propia pantalla de inventario (tecla E) — a
+ * diferencia de un cofre/barril, es 100% client-side. Sin algun disparador externo, la
+ * comida que el jugador lleva encima se veria "congelada" en pantalla hasta la proxima
+ * interaccion real (click, recoger del suelo, reconectarse), aunque el tiempo in-game siga
+ * corriendo. Por eso {@code RealisticSurvival} programa una tarea periodica MUY liviana
+ * (ver {@link #refreshPlayerInventory}) que solo llama a este mismo catch-up para los
+ * inventarios de jugadores conectados — no agrega logica de decaimiento nueva, ni toca
+ * contenedores/electrodomesticos (esos siguen 100% event-driven).
  */
 public final class InventoryListener implements Listener {
 
@@ -143,6 +153,18 @@ public final class InventoryListener implements Listener {
 
         double currentDay = timeProvider.getCurrentDay(event.getPlayer().getWorld());
         refreshInventory(inventory, currentDay);
+    }
+
+    /**
+     * Punto de entrada publico para la tarea periodica de {@code RealisticSurvival} que
+     * pone al dia el inventario propio de cada jugador conectado (ver el Javadoc de la
+     * clase, seccion "Excepcion documentada al cero ticking activo"). Reutiliza el mismo
+     * {@link #refreshInventory} que ya usan {@link #onJoin}/{@link #onInventoryOpen} — no
+     * hay formula ni logica nueva, solo un disparador adicional.
+     */
+    public void refreshPlayerInventory(Player player) {
+        double currentDay = timeProvider.getCurrentDay(player.getWorld());
+        refreshInventory(player.getInventory(), currentDay);
     }
 
     /**

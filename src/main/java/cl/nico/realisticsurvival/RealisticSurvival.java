@@ -13,9 +13,12 @@ import cl.nico.realisticsurvival.food.ConsumeListener;
 import cl.nico.realisticsurvival.food.FoodManager;
 import cl.nico.realisticsurvival.inventory.InventoryListener;
 import cl.nico.realisticsurvival.recipes.RecipeManager;
+import org.bukkit.Bukkit;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 
 /**
  * Clase principal del plugin. Unica responsabilidad: bootstrap — construir el grafo de
@@ -27,11 +30,21 @@ import org.bukkit.plugin.java.JavaPlugin;
  * RealisticSeasons es una dependencia fuerte (hard dependency, ver plugin.yml -> depend):
  * el servidor no llega a cargar este plugin si RealisticSeasons no esta presente y
  * habilitado.
+ * <p>
+ * <b>Excepcion unica al "cero ticking activo":</b> ver el Javadoc de
+ * {@link InventoryListener#refreshPlayerInventory} para el porque. {@link #playerRefreshTask}
+ * es la UNICA tarea periodica de todo el plugin — no calcula nada nuevo, solo re-dispara el
+ * mismo catch-up de siempre para los inventarios de jugadores conectados, cada
+ * {@link #PLAYER_REFRESH_PERIOD_TICKS} ticks.
  */
 public final class RealisticSurvival extends JavaPlugin {
 
+    /** ~5 segundos reales (20 ticks/seg). Frecuencia de la unica tarea periodica del plugin. */
+    private static final long PLAYER_REFRESH_PERIOD_TICKS = 100L;
+
     private TimeProvider timeProvider;
     private FoodManager foodManager;
+    private BukkitTask playerRefreshTask;
 
     @Override
     public void onEnable() {
@@ -94,13 +107,30 @@ public final class RealisticSurvival extends JavaPlugin {
         recipeManager.registerAll();
         pluginManager.registerEvents(recipeManager, this);
 
+        // --- unica tarea periodica del plugin (ver Javadoc de la clase) ---
+        // Bukkit no dispara ningun evento cuando un jugador abre su propia pantalla de
+        // inventario (tecla E), asi que sin esto la comida cargada se veria "congelada"
+        // hasta la proxima interaccion real. No agrega calculo nuevo: solo vuelve a llamar
+        // al mismo catch-up de InventoryListener para cada jugador conectado.
+        this.playerRefreshTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                inventoryListener.refreshPlayerInventory(player);
+            }
+        }, PLAYER_REFRESH_PERIOD_TICKS, PLAYER_REFRESH_PERIOD_TICKS);
+
         getLogger().info("RealisticSurvival habilitado.");
     }
 
     @Override
     public void onDisable() {
-        // Cero ticking activo: no hay tareas/schedulers que detener. Cualquier estado
-        // pendiente ya vive persistido en PDC (bloques/chunks) y DataComponentTypes (items).
+        // Unica tarea a detener: el refresco periodico del inventario propio de jugadores
+        // (ver onEnable). El resto del plugin sigue siendo 100% catch-up/event-driven; el
+        // estado pendiente ya vive persistido en PDC (bloques/chunks) y DataComponentTypes
+        // (items), no depende de que esta tarea haya corrido para quedar consistente.
+        if (playerRefreshTask != null) {
+            playerRefreshTask.cancel();
+            playerRefreshTask = null;
+        }
         getLogger().info("RealisticSurvival deshabilitado.");
     }
 
