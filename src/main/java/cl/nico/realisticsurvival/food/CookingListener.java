@@ -1,10 +1,16 @@
 package cl.nico.realisticsurvival.food;
 
 import cl.nico.realisticsurvival.api.time.TimeProvider;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.FurnaceSmeltEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.function.Consumer;
@@ -20,12 +26,15 @@ import java.util.function.Consumer;
  * (sin pasar de 100%): una carne cruda casi podrida sigue casi podrida despues de cocinarse,
  * solo un poco mejor — cocinar no es una cura magica de frescura.
  * <p>
- * <b>Fogata excluida a proposito:</b> {@code CampfireStartEvent} no tiene forma de
- * interceptar/reemplazar el resultado (no expone {@code getResult()}/{@code setResult()}
- * como {@link FurnaceSmeltEvent} — el item de salida lo resuelve la receta internamente), y
- * Bukkit no dispara ningun evento cuando la fogata termina de cocinar y expulsa el item.
- * Sin un punto de intercepcion real, no hay forma limpia de aplicar este bono ahi sin recurrir
- * a polling (ticking activo, prohibido por el diseño) — limitacion conocida de la API.
+ * <b>Fogata excluida a proposito (y bloqueada, ver {@link #onCampfirePlace}):</b>
+ * {@code CampfireStartEvent} no tiene forma de interceptar/reemplazar el resultado (no
+ * expone {@code getResult()}/{@code setResult()} como {@link FurnaceSmeltEvent} — el item
+ * de salida lo resuelve la receta internamente), y Bukkit no dispara ningun evento cuando
+ * la fogata termina de cocinar y expulsa el item. Sin un punto de intercepcion real, no hay
+ * forma limpia de aplicar este bono ahi sin recurrir a polling (ticking activo, prohibido
+ * por el diseño) — limitacion conocida de la API. Dejarla cocinar sin control seria un
+ * exploit real (lavar cualquier alimento casi podrido a 100% gratis), asi que mientras no
+ * exista un hook confiable, directamente se bloquea colocar comida rastreada en la fogata.
  * <p>
  * No contiene logica de decaimiento propia: solo lee/escribe frescura via los metodos
  * publicos de {@link FoodManager} (SRP, mismo patron que {@code inventory.InventoryListener}
@@ -46,6 +55,33 @@ public final class CookingListener implements Listener {
     public void onFurnaceSmelt(FurnaceSmeltEvent event) {
         World world = event.getBlock().getWorld();
         applyCookingBonus(event.getSource(), event.getResult(), event::setResult, world);
+    }
+
+    /**
+     * Bloquea colocar comida rastreada por el plugin sobre una Fogata/Fogata de Alma (ver
+     * Javadoc de la clase, "Fogata excluida a proposito") — cancela la interaccion antes de
+     * que el item llegue a colocarse, cerrando el exploit de "cocinar para lavar frescura"
+     * mientras no exista forma de corregir el resultado ahi.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onCampfirePlace(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
+        Block block = event.getClickedBlock();
+        if (block == null || (block.getType() != Material.CAMPFIRE && block.getType() != Material.SOUL_CAMPFIRE)) {
+            return;
+        }
+
+        ItemStack item = event.getItem();
+        if (item == null || (!foodManager.isTrackable(item) && !foodManager.isTracked(item))) {
+            return;
+        }
+
+        event.setCancelled(true);
+        event.getPlayer().sendActionBar(Component.text(
+                "La Fogata no puede cocinar este alimento por ahora — usa un Horno/Ahumador/Horno de Lava.",
+                NamedTextColor.RED));
     }
 
     /**
