@@ -3,14 +3,19 @@ package cl.nico.realisticsurvival.farming;
 import cl.nico.realisticsurvival.api.time.TimeProvider;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.CustomModelData;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.type.Farmland;
 import org.bukkit.entity.Display;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -25,6 +30,8 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.util.Transformation;
 import org.joml.AxisAngle4f;
 import org.joml.Vector3f;
+
+import java.util.UUID;
 
 /**
  * Logica de las herramientas de riego activo: la Regadera Manual (se recarga en una
@@ -88,11 +95,16 @@ public final class WateringManager implements Listener {
      */
     private static final Material SPRINKLER_FALLBACK = Material.DISPENSER;
 
+    private static Component itemName(String name) {
+        return Component.text(name, NamedTextColor.WHITE).decoration(TextDecoration.ITALIC, false);
+    }
+
     /** Crea el ItemStack de la Regadera Manual. CustomModelData es placeholder. */
     public ItemStack createWateringCan() {
         ItemStack item = new ItemStack(WATERING_CAN_FALLBACK);
         item.setData(DataComponentTypes.CUSTOM_MODEL_DATA, CustomModelData.customModelData().addFloat(1_200_001).build());
         item.editMeta(meta -> {
+            meta.displayName(itemName("Regadera Manual"));
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(keyCanMarker, PersistentDataType.BOOLEAN, true);
             pdc.set(keyCanCharges, PersistentDataType.INTEGER, WATERING_CAN_MAX_CHARGES);
@@ -104,7 +116,10 @@ public final class WateringManager implements Listener {
     public ItemStack createSprinklerItem() {
         ItemStack item = new ItemStack(SPRINKLER_FALLBACK);
         item.setData(DataComponentTypes.CUSTOM_MODEL_DATA, CustomModelData.customModelData().addFloat(1_200_002).build());
-        item.editMeta(meta -> meta.getPersistentDataContainer().set(keySprinklerMarker, PersistentDataType.BOOLEAN, true));
+        item.editMeta(meta -> {
+            meta.displayName(itemName("Aspersor"));
+            meta.getPersistentDataContainer().set(keySprinklerMarker, PersistentDataType.BOOLEAN, true);
+        });
         return item;
     }
 
@@ -135,6 +150,28 @@ public final class WateringManager implements Listener {
             event.setCancelled(true);
             placeSprinkler(event.getPlayer(), item, clicked, event.getBlockFace());
         }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onBreakSprinkler(PlayerInteractEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND || event.getAction() != Action.LEFT_CLICK_BLOCK) {
+            return;
+        }
+        Block clicked = event.getClickedBlock();
+        if (clicked == null || clicked.getType() != Material.BARRIER || !isTrackedSprinkler(clicked.getLocation())) {
+            return;
+        }
+        if (!isHoldingPickaxe(event.getItem())) {
+            // Igual que un Dispensador real: hace falta una picota. Sin ticking activo no
+            // se simula el tiempo de picado: o se rompe con picota en un click, o nada.
+            return;
+        }
+        event.setCancelled(true);
+        breakSprinkler(event.getPlayer(), clicked);
+    }
+
+    private boolean isHoldingPickaxe(ItemStack item) {
+        return item != null && Tag.ITEMS_PICKAXES.isTagged(item.getType());
     }
 
     private void handleWateringCanUse(PlayerInteractEvent event, ItemStack can) {
@@ -183,14 +220,17 @@ public final class WateringManager implements Listener {
     }
 
     private void placeSprinkler(Player player, ItemStack handItem, Block clickedBlock, BlockFace face) {
-        Block target = clickedBlock.getRelative(face);
+        // Si el bloque clickeado es "reemplazable" (nieve en capas, pasto alto, agua,
+        // etc.) se coloca ENCIMA de su propia posicion, igual que vanilla — si no,
+        // se coloca adyacente segun la cara clickeada.
+        Block target = clickedBlock.isReplaceable() ? clickedBlock : clickedBlock.getRelative(face);
         if (!target.isEmpty() && !target.isReplaceable()) {
             return;
         }
 
         target.setType(Material.BARRIER);
         Location center = target.getLocation().add(0.5, 0.5, 0.5);
-        target.getWorld().spawn(center, ItemDisplay.class, entity -> {
+        ItemDisplay display = target.getWorld().spawn(center, ItemDisplay.class, entity -> {
             entity.setItemStack(createSprinklerItem());
             entity.setBillboard(Display.Billboard.FIXED);
             entity.setPersistent(true);
@@ -204,9 +244,47 @@ public final class WateringManager implements Listener {
         long currentDay = timeProvider.getCurrentDay(target.getWorld());
         chunkPdc.set(new NamespacedKey(plugin, prefix + "_charges"), PersistentDataType.INTEGER, 0);
         chunkPdc.set(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.LONG, currentDay);
+        chunkPdc.set(new NamespacedKey(plugin, prefix + "_display_uuid"), PersistentDataType.STRING,
+                display.getUniqueId().toString());
 
         if (player.getGameMode() != GameMode.CREATIVE) {
             handItem.setAmount(handItem.getAmount() - 1);
+        }
+    }
+
+    /**
+     * Rompe un Aspersor colocado: remueve la Barrera, la entidad {@link ItemDisplay} y el
+     * estado guardado en el PDC del chunk, y devuelve el item (con la carga de agua
+     * pendiente perdida — simplificacion deliberada, no se convierte de vuelta a Cubos de
+     * Agua).
+     */
+    private void breakSprinkler(Player player, Block barrierBlock) {
+        Location location = barrierBlock.getLocation();
+        despawnSprinklerDisplay(location);
+
+        PersistentDataContainer chunkPdc = barrierBlock.getChunk().getPersistentDataContainer();
+        String prefix = sprinklerKeyPrefix(location);
+        chunkPdc.remove(new NamespacedKey(plugin, prefix + "_charges"));
+        chunkPdc.remove(new NamespacedKey(plugin, prefix + "_last_day"));
+        chunkPdc.remove(new NamespacedKey(plugin, prefix + "_display_uuid"));
+
+        barrierBlock.setType(Material.AIR);
+
+        if (player.getGameMode() != GameMode.CREATIVE) {
+            barrierBlock.getWorld().dropItemNaturally(location.clone().add(0.5, 0.5, 0.5), createSprinklerItem());
+        }
+    }
+
+    private void despawnSprinklerDisplay(Location barrierLocation) {
+        PersistentDataContainer chunkPdc = barrierLocation.getChunk().getPersistentDataContainer();
+        NamespacedKey key = new NamespacedKey(plugin, sprinklerKeyPrefix(barrierLocation) + "_display_uuid");
+        String raw = chunkPdc.get(key, PersistentDataType.STRING);
+        if (raw == null) {
+            return;
+        }
+        Entity entity = barrierLocation.getWorld().getEntity(UUID.fromString(raw));
+        if (entity != null) {
+            entity.remove();
         }
     }
 

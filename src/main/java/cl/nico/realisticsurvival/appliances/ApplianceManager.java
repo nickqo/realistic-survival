@@ -2,10 +2,14 @@ package cl.nico.realisticsurvival.appliances;
 
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.CustomModelData;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
+import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Display;
@@ -61,16 +65,18 @@ public final class ApplianceManager implements Listener {
     /** Tipos de electrodomestico soportados (seccion 4). */
     public enum ApplianceType {
         /** Dropper: distinguible del Congelador (Dispensador) incluso sin Resource Pack. */
-        FRIDGE(1_100_001, Material.DROPPER),
+        FRIDGE(1_100_001, Material.DROPPER, "Refrigerador"),
         /** Dispensador: distinguible del Refrigerador (Dropper) incluso sin Resource Pack. */
-        FREEZER(1_100_002, Material.DISPENSER);
+        FREEZER(1_100_002, Material.DISPENSER, "Congelador");
 
         private final int customModelData;
         private final Material fallbackMaterial;
+        private final String displayName;
 
-        ApplianceType(int customModelData, Material fallbackMaterial) {
+        ApplianceType(int customModelData, Material fallbackMaterial, String displayName) {
             this.customModelData = customModelData;
             this.fallbackMaterial = fallbackMaterial;
+            this.displayName = displayName;
         }
 
         public int getCustomModelData() {
@@ -80,6 +86,10 @@ public final class ApplianceManager implements Listener {
         /** Material vanilla usado como base del modelo cuando no hay Resource Pack activo. */
         public Material getFallbackMaterial() {
             return fallbackMaterial;
+        }
+
+        public String getDisplayName() {
+            return displayName;
         }
     }
 
@@ -136,6 +146,8 @@ public final class ApplianceManager implements Listener {
         ItemStack item = new ItemStack(type.getFallbackMaterial());
         item.setData(DataComponentTypes.CUSTOM_MODEL_DATA,
                 CustomModelData.customModelData().addFloat(type.getCustomModelData()).build());
+        item.editMeta(meta -> meta.displayName(Component.text(type.getDisplayName(), NamedTextColor.WHITE)
+                .decoration(TextDecoration.ITALIC, false)));
         return item;
     }
 
@@ -163,6 +175,12 @@ public final class ApplianceManager implements Listener {
         if (event.getAction() == Action.LEFT_CLICK_BLOCK
                 && clicked.getType() == Material.BARRIER
                 && isTrackedAppliance(clicked.getLocation())) {
+            if (!isHoldingPickaxe(event.getItem())) {
+                // Igual que un Dropper/Dispensador real: hace falta una picota. Sin una,
+                // no pasa nada (no simulamos el tiempo de picado real para no necesitar
+                // ticking activo: o se rompe con picota en un click, o no se rompe).
+                return;
+            }
             event.setCancelled(true);
             breakAppliance(event.getPlayer(), clicked);
             return;
@@ -178,7 +196,10 @@ public final class ApplianceManager implements Listener {
     }
 
     private void placeAppliance(Player player, ItemStack handItem, Block clickedBlock, BlockFace face, ApplianceType type) {
-        Block target = clickedBlock.getRelative(face);
+        // Si el bloque clickeado es "reemplazable" (nieve en capas, pasto alto, agua,
+        // etc.) se coloca ENCIMA de su propia posicion, igual que vanilla — si no,
+        // se coloca adyacente segun la cara clickeada.
+        Block target = clickedBlock.isReplaceable() ? clickedBlock : clickedBlock.getRelative(face);
         if (!target.isEmpty() && !target.isReplaceable()) {
             return;
         }
@@ -219,6 +240,10 @@ public final class ApplianceManager implements Listener {
 
     public boolean isTrackedAppliance(Location barrierLocation) {
         return readBlockApplianceType(barrierLocation) != null;
+    }
+
+    private boolean isHoldingPickaxe(ItemStack item) {
+        return item != null && Tag.ITEMS_PICKAXES.isTagged(item.getType());
     }
 
     private ApplianceType readBlockApplianceType(Location barrierLocation) {

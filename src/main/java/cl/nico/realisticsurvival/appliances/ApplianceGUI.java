@@ -11,6 +11,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
@@ -19,12 +20,13 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
 /**
- * Interfaz virtual (GUI) de 9 slots para los electrodomesticos (Slot 8 reservado para
- * Hielo / Hielo Azul, ver {@link #FUEL_SLOT}). Responsabilidad unica: abrir/cerrar/
- * serializar el inventario virtual asociado a una ubicacion, persistiendolo en el PDC del
- * {@link org.bukkit.Chunk} (asociado a las coordenadas del bloque) — NO calcula pudricion
- * ni consumo de hielo (ver {@link CatchUpProcessor}), NO maneja el bloque/entidad fisica
- * (ver {@link ApplianceManager}).
+ * Interfaz virtual (GUI) de 9 slots para los electrodomesticos, con la misma grilla 3x3
+ * que un Dropper/Dispensador vanilla ({@link InventoryType#DISPENSER}) — Slot 8 (esquina
+ * inferior derecha) reservado para Hielo / Hielo Azul, ver {@link #FUEL_SLOT}.
+ * Responsabilidad unica: abrir/cerrar/serializar el inventario virtual asociado a una
+ * ubicacion, persistiendolo en el PDC del {@link org.bukkit.Chunk} (asociado a las
+ * coordenadas del bloque) — NO calcula pudricion ni consumo de hielo (ver
+ * {@link CatchUpProcessor}), NO maneja el bloque/entidad fisica (ver {@link ApplianceManager}).
  */
 public final class ApplianceGUI implements Listener {
 
@@ -60,9 +62,10 @@ public final class ApplianceGUI implements Listener {
         catchUpProcessor.process(contents, lastCalcDay, currentDay, type == ApplianceType.FREEZER);
         serializeContents(applianceLocation, contents, currentDay);
 
-        String title = type == ApplianceType.FREEZER ? "Congelador" : "Refrigerador";
         ApplianceHolder holder = new ApplianceHolder(applianceLocation);
-        Inventory inventory = Bukkit.createInventory(holder, SIZE, Component.text(title));
+        // InventoryType.DISPENSER da la misma grilla 3x3 (9 slots) que un Dropper/
+        // Dispensador vanilla, en vez de la fila de 9 generica.
+        Inventory inventory = Bukkit.createInventory(holder, InventoryType.DISPENSER, Component.text(type.getDisplayName()));
         inventory.setContents(contents);
         holder.inventory = inventory;
 
