@@ -55,8 +55,8 @@ public final class ApplianceGUI implements Listener {
             return;
         }
 
-        long currentDay = timeProvider.getCurrentDay(applianceLocation.getWorld());
-        long lastCalcDay = readLastCalcDay(applianceLocation, currentDay);
+        double currentDay = timeProvider.getCurrentDay(applianceLocation.getWorld());
+        double lastCalcDay = readLastCalcDay(applianceLocation, currentDay);
         ItemStack[] contents = deserializeContents(applianceLocation);
 
         catchUpProcessor.process(contents, lastCalcDay, currentDay, type == ApplianceType.FREEZER);
@@ -80,7 +80,7 @@ public final class ApplianceGUI implements Listener {
 
         // Sin ticking: al cerrar se guarda el estado y no vuelve a correr nada hasta la
         // proxima apertura (que disparara un nuevo catch-up).
-        long currentDay = timeProvider.getCurrentDay(holder.location.getWorld());
+        double currentDay = timeProvider.getCurrentDay(holder.location.getWorld());
         serializeContents(holder.location, event.getInventory().getContents(), currentDay);
     }
 
@@ -127,10 +127,10 @@ public final class ApplianceGUI implements Listener {
         }
     }
 
-    private long readLastCalcDay(Location applianceLocation, long fallback) {
+    private double readLastCalcDay(Location applianceLocation, double fallback) {
         PersistentDataContainer chunkPdc = applianceLocation.getChunk().getPersistentDataContainer();
         String prefix = ApplianceManager.applianceKeyPrefix(applianceLocation);
-        return chunkPdc.getOrDefault(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.LONG, fallback);
+        return chunkPdc.getOrDefault(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.DOUBLE, fallback);
     }
 
     /**
@@ -153,12 +153,12 @@ public final class ApplianceGUI implements Listener {
         return contents;
     }
 
-    private void serializeContents(Location applianceLocation, ItemStack[] contents, long currentDay) {
+    private void serializeContents(Location applianceLocation, ItemStack[] contents, double currentDay) {
         PersistentDataContainer chunkPdc = applianceLocation.getChunk().getPersistentDataContainer();
         String prefix = ApplianceManager.applianceKeyPrefix(applianceLocation);
         chunkPdc.set(new NamespacedKey(plugin, prefix + "_contents"), PersistentDataType.BYTE_ARRAY,
                 ItemStack.serializeItemsAsBytes(contents));
-        chunkPdc.set(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.LONG, currentDay);
+        chunkPdc.set(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.DOUBLE, currentDay);
     }
 
     /** Marca liviana que ata un inventario virtual abierto a su ubicacion fisica. */

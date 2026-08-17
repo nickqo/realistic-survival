@@ -44,19 +44,24 @@ public final class CatchUpProcessor {
      *
      * @param contents   contenido actual (tamaño {@link ApplianceGUI#SIZE}, slot
      *                   {@link ApplianceGUI#FUEL_SLOT} = combustible de hielo)
-     * @param lastCalcDay dia in-game en que se calculo por ultima vez (al cerrar la GUI)
-     * @param currentDay dia in-game absoluto actual
+     * @param lastCalcDay dia in-game (con fraccion horaria) en que se calculo por ultima
+     *                    vez (al cerrar la GUI)
+     * @param currentDay dia in-game absoluto actual (con fraccion horaria)
      * @param isFreezer  true si es Congelador (frio = detiene pudricion + marca frozen),
      *                   false si es Refrigerador (frio = x3 duracion, ver
      *                   {@link FoodManager#FRIDGE_MULTIPLIER})
      */
-    public void process(ItemStack[] contents, long lastCalcDay, long currentDay, boolean isFreezer) {
-        long elapsedDays = Math.max(0, currentDay - lastCalcDay);
+    public void process(ItemStack[] contents, double lastCalcDay, double currentDay, boolean isFreezer) {
+        double elapsedDays = Math.max(0.0, currentDay - lastCalcDay);
 
         ItemStack fuel = contents[ApplianceGUI.FUEL_SLOT];
-        long iceDaysAvailable = (fuel == null) ? 0 : fuel.getAmount();
-        long coldDays = Math.min(elapsedDays, iceDaysAvailable);
-        long ambientDays = elapsedDays - coldDays;
+        double iceDaysAvailable = (fuel == null) ? 0 : fuel.getAmount();
+        // coldDays queda fraccionario (protege exactamente el tiempo transcurrido, hasta
+        // el tope de hielo disponible) — el consumo de hielo en si, mas abajo, redondea
+        // hacia arriba porque el hielo es un recurso discreto (no se puede gastar "0.3
+        // hielo"): se prefiere gastar de mas antes que dejar un tramo parcial sin proteger.
+        double coldDays = Math.min(elapsedDays, iceDaysAvailable);
+        double ambientDays = elapsedDays - coldDays;
         double coldMultiplier = isFreezer ? FoodManager.FREEZER_MULTIPLIER : FoodManager.FRIDGE_MULTIPLIER;
 
         for (int slot = 0; slot < ApplianceGUI.FUEL_SLOT; slot++) {
@@ -85,7 +90,14 @@ public final class CatchUpProcessor {
         }
 
         if (fuel != null && coldDays > 0) {
-            int consumed = (int) Math.min(fuel.getAmount(), coldDays);
+            // El hielo es un recurso discreto: no se puede consumir una fraccion. Se
+            // redondea HACIA ARRIBA (ceil) la cantidad de dias frios cubiertos — asi un
+            // tramo parcial (ej. 2.3 dias) igual "gasta" el hielo que lo cubrio entero,
+            // en vez de dejarlo a medio consumir. Es un poco conservador (podria gastar
+            // hasta ~1 hielo antes de lo estrictamente optimo si se reabre muy seguido)
+            // pero evita el problema inverso, mas grave: dejar el ultimo tramo parcial
+            // sin protección aunque hubiera hielo disponible para cubrirlo.
+            int consumed = (int) Math.min(fuel.getAmount(), Math.ceil(coldDays));
             int remaining = fuel.getAmount() - consumed;
             if (remaining <= 0) {
                 contents[ApplianceGUI.FUEL_SLOT] = null;

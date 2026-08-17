@@ -61,7 +61,7 @@ public final class InventoryListener implements Listener {
             // No hay fusion que hacer, pero igual aprovechamos el click para recalcular
             // cualquiera de los dos items (etiquetarlo si es nuevo, o ponerlo al dia si
             // ya estaba trackeado pero viejo).
-            long currentDay = timeProvider.getCurrentDay(event.getWhoClicked().getWorld());
+            double currentDay = timeProvider.getCurrentDay(event.getWhoClicked().getWorld());
             refreshFreshness(current, currentDay);
             refreshFreshness(cursor, currentDay);
             return;
@@ -78,7 +78,7 @@ public final class InventoryListener implements Listener {
 
         event.setCancelled(true);
 
-        long currentDay = timeProvider.getCurrentDay(event.getWhoClicked().getWorld());
+        double currentDay = timeProvider.getCurrentDay(event.getWhoClicked().getWorld());
         ItemStack[] merged = mergeStacks(current, cursor, currentDay);
 
         event.setCurrentItem(merged[0]);
@@ -104,7 +104,7 @@ public final class InventoryListener implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         Inventory inventory = event.getPlayer().getInventory();
-        long currentDay = timeProvider.getCurrentDay(event.getPlayer().getWorld());
+        double currentDay = timeProvider.getCurrentDay(event.getPlayer().getWorld());
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             refreshFreshness(inventory.getItem(slot), currentDay);
         }
@@ -126,7 +126,7 @@ public final class InventoryListener implements Listener {
             return;
         }
 
-        long currentDay = timeProvider.getCurrentDay(event.getPlayer().getWorld());
+        double currentDay = timeProvider.getCurrentDay(event.getPlayer().getWorld());
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             refreshFreshness(inventory.getItem(slot), currentDay);
         }
@@ -138,7 +138,7 @@ public final class InventoryListener implements Listener {
      * alimento nunca queda "viejo" por mucho tiempo real sin recalcularse. Muta
      * {@code item} in-place; no hace nada si no es un alimento gestionado por el plugin.
      */
-    private void refreshFreshness(ItemStack item, long currentDay) {
+    private void refreshFreshness(ItemStack item, double currentDay) {
         if (item != null && (foodManager.isTrackable(item) || foodManager.isTracked(item))) {
             foodManager.calculateFreshness(item, currentDay, FoodManager.AMBIENT_MULTIPLIER);
         }
@@ -156,7 +156,7 @@ public final class InventoryListener implements Listener {
         }
 
         Inventory inventory = player.getInventory();
-        long currentDay = timeProvider.getCurrentDay(player.getWorld());
+        double currentDay = timeProvider.getCurrentDay(player.getWorld());
 
         for (int slot = 0; slot < inventory.getSize(); slot++) {
             ItemStack existing = inventory.getItem(slot);
@@ -200,7 +200,7 @@ public final class InventoryListener implements Listener {
      *         (hasta el maximo apilable), [1] = remanente que no entro (o {@code null} si
      *         todo entro en el slot).
      */
-    private ItemStack[] mergeStacks(ItemStack a, ItemStack b, long currentDay) {
+    private ItemStack[] mergeStacks(ItemStack a, ItemStack b, double currentDay) {
         int freshnessA = foodManager.calculateFreshness(a, currentDay, FoodManager.AMBIENT_MULTIPLIER);
         int freshnessB = foodManager.calculateFreshness(b, currentDay, FoodManager.AMBIENT_MULTIPLIER);
 

@@ -189,7 +189,7 @@ public final class FoodManager {
      *         llamador debe invocar {@link #transformToRotten} explicitamente y usar la
      *         referencia que devuelve (ver ese metodo para el porque).
      */
-    public int calculateFreshness(ItemStack item, long currentDay, double storageMultiplier) {
+    public int calculateFreshness(ItemStack item, double currentDay, double storageMultiplier) {
         if (item == null || item.getType().isAir()) {
             throw new IllegalArgumentException("item no puede ser null/aire");
         }
@@ -213,8 +213,8 @@ public final class FoodManager {
         }
 
         if (isFrozen(item)) {
-            long thawStart = readOrInitThawStartDay(item, currentDay);
-            long daysThawing = currentDay - thawStart;
+            double thawStart = readOrInitThawStartDay(item, currentDay);
+            double daysThawing = currentDay - thawStart;
             if (daysThawing < THAW_DAYS) {
                 // Aun descongelandose: no pierde el estado ni empieza a pudrirse todavia.
                 writeLastCalcDay(item, currentDay);
@@ -227,8 +227,8 @@ public final class FoodManager {
         }
 
         int stored = getStoredFreshness(item);
-        long lastCalcDay = readLastCalcDay(item, currentDay);
-        long elapsedDays = Math.max(0, currentDay - lastCalcDay);
+        double lastCalcDay = readLastCalcDay(item, currentDay);
+        double elapsedDays = Math.max(0.0, currentDay - lastCalcDay);
 
         double ratePerDay = 100.0 / totalDecayDays(item.getType());
         double raw = stored - (elapsedDays * ratePerDay / storageMultiplier);
@@ -285,7 +285,7 @@ public final class FoodManager {
      * responsabilidad explicita de {@link #transformToRotten}, que el llamador debe invocar
      * cuando corresponda (ver {@link #calculateFreshness}).
      */
-    public void applyFreshness(ItemStack item, int freshness, long currentDay) {
+    public void applyFreshness(ItemStack item, int freshness, double currentDay) {
         applyFreshness(item, freshness, currentDay, roundToNearestTen(freshness) * 100L);
     }
 
@@ -298,14 +298,14 @@ public final class FoodManager {
      * stacks) deben usar este overload en vez del de 3 argumentos para que el Lore de debug
      * sea preciso.
      */
-    public void applyFreshness(ItemStack item, int freshness, long currentDay, long rawTimes100) {
+    public void applyFreshness(ItemStack item, int freshness, double currentDay, long rawTimes100) {
         int clamped = Math.max(0, Math.min(100, roundToNearestTen(freshness)));
         boolean frozen = isFrozen(item);
 
         item.editMeta(meta -> {
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(keyFreshness, PersistentDataType.INTEGER, clamped);
-            pdc.set(keyLastCalcDay, PersistentDataType.LONG, currentDay);
+            pdc.set(keyLastCalcDay, PersistentDataType.DOUBLE, currentDay);
             pdc.set(keyDebugRawX100, PersistentDataType.LONG, rawTimes100);
             meta.lore(buildFreshnessLore(clamped, frozen, rawTimes100));
         });
@@ -427,23 +427,23 @@ public final class FoodManager {
         item.editMeta(meta -> meta.getPersistentDataContainer().remove(keyThawStartDay));
     }
 
-    private long readOrInitThawStartDay(ItemStack item, long currentDay) {
+    private double readOrInitThawStartDay(ItemStack item, double currentDay) {
         PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
-        Long existing = pdc.get(keyThawStartDay, PersistentDataType.LONG);
+        Double existing = pdc.get(keyThawStartDay, PersistentDataType.DOUBLE);
         if (existing != null) {
             return existing;
         }
-        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyThawStartDay, PersistentDataType.LONG, currentDay));
+        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyThawStartDay, PersistentDataType.DOUBLE, currentDay));
         return currentDay;
     }
 
-    private long readLastCalcDay(ItemStack item, long fallback) {
+    private double readLastCalcDay(ItemStack item, double fallback) {
         return item.getItemMeta().getPersistentDataContainer()
-                .getOrDefault(keyLastCalcDay, PersistentDataType.LONG, fallback);
+                .getOrDefault(keyLastCalcDay, PersistentDataType.DOUBLE, fallback);
     }
 
-    private void writeLastCalcDay(ItemStack item, long day) {
-        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyLastCalcDay, PersistentDataType.LONG, day));
+    private void writeLastCalcDay(ItemStack item, double day) {
+        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyLastCalcDay, PersistentDataType.DOUBLE, day));
     }
 
     private int totalDecayDays(Material material) {

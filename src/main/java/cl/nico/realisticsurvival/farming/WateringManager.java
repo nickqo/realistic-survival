@@ -241,9 +241,9 @@ public final class WateringManager implements Listener {
 
         PersistentDataContainer chunkPdc = target.getChunk().getPersistentDataContainer();
         String prefix = sprinklerKeyPrefix(target.getLocation());
-        long currentDay = timeProvider.getCurrentDay(target.getWorld());
+        double currentDay = timeProvider.getCurrentDay(target.getWorld());
         chunkPdc.set(new NamespacedKey(plugin, prefix + "_charges"), PersistentDataType.INTEGER, 0);
-        chunkPdc.set(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.LONG, currentDay);
+        chunkPdc.set(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.DOUBLE, currentDay);
         chunkPdc.set(new NamespacedKey(plugin, prefix + "_display_uuid"), PersistentDataType.STRING,
                 display.getUniqueId().toString());
 
@@ -317,7 +317,9 @@ public final class WateringManager implements Listener {
     /**
      * Calculo pasivo (catch-up) del Aspersor: se invoca al interactuar con el, nunca en
      * background. Por cada dia in-game transcurrido con carga disponible, hidrata el area
-     * de 5x5 ({@link #SPRINKLER_RADIUS}) y descuenta un dia de carga.
+     * de 5x5 ({@link #SPRINKLER_RADIUS}) y descuenta la carga correspondiente. Al igual que
+     * el hielo de los electrodomesticos, la carga es un recurso discreto (dias enteros), asi
+     * que el consumo redondea hacia arriba (ver {@code CatchUpProcessor} para el porque).
      */
     public void catchUpSprinkler(Location sprinklerLocation, boolean applyHydration) {
         PersistentDataContainer chunkPdc = sprinklerLocation.getChunk().getPersistentDataContainer();
@@ -325,19 +327,19 @@ public final class WateringManager implements Listener {
         NamespacedKey chargesKey = new NamespacedKey(plugin, prefix + "_charges");
         NamespacedKey lastDayKey = new NamespacedKey(plugin, prefix + "_last_day");
 
-        long currentDay = timeProvider.getCurrentDay(sprinklerLocation.getWorld());
-        long lastDay = chunkPdc.getOrDefault(lastDayKey, PersistentDataType.LONG, currentDay);
+        double currentDay = timeProvider.getCurrentDay(sprinklerLocation.getWorld());
+        double lastDay = chunkPdc.getOrDefault(lastDayKey, PersistentDataType.DOUBLE, currentDay);
         int charges = chunkPdc.getOrDefault(chargesKey, PersistentDataType.INTEGER, 0);
 
-        long elapsedDays = Math.max(0, currentDay - lastDay);
-        int usedDays = (int) Math.min(elapsedDays, charges);
+        double elapsedDays = Math.max(0.0, currentDay - lastDay);
+        int usedDays = (int) Math.min(charges, Math.ceil(Math.min(elapsedDays, charges)));
 
         if (applyHydration && usedDays > 0) {
             hydrateArea(sprinklerLocation, SPRINKLER_RADIUS);
         }
 
         chunkPdc.set(chargesKey, PersistentDataType.INTEGER, charges - usedDays);
-        chunkPdc.set(lastDayKey, PersistentDataType.LONG, currentDay);
+        chunkPdc.set(lastDayKey, PersistentDataType.DOUBLE, currentDay);
     }
 
     private int getCanCharges(ItemStack can) {

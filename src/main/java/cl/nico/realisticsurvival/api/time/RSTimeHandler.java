@@ -31,8 +31,11 @@ import org.bukkit.entity.Player;
  *         / {@code getTemperature(Player)}</li>
  *     <li>{@code RealisticSeasons.getInstance().getTimeManager().getCalendar()} expone el
  *         {@link Calendar} configurado (largos de mes/anio custom), cuyo
- *         {@code getTotalDays(Date)} entrega el contador de "dias in-game absolutos" que
- *         pide {@link TimeProvider#getCurrentDay}.</li>
+ *         {@code getTotalDays(Date)} entrega el contador de dias in-game absolutos.</li>
+ *     <li>{@code SeasonsAPI.getHours/getMinutes/getSeconds(World)} entregan la hora del
+ *         dia actual (asumido reloj estandar 24h/60min/60seg — best-effort, no verificable
+ *         sin un cliente corriendo), combinada con {@code getTotalDays} para dar precision
+ *         de hora a {@link TimeProvider#getCurrentDay}.</li>
  * </ul>
  * RS no expone un metodo de clima en su API publica: el clima (lluvia/nieve) se controla
  * internamente pero se refleja en el clima vanilla del mundo, por lo que {@code isRaining}
@@ -67,9 +70,16 @@ public final class RSTimeHandler implements TimeProvider {
     }
 
     @Override
-    public long getCurrentDay(World world) {
+    public double getCurrentDay(World world) {
         Date date = seasonsApi.getDate(world);
-        return calendar().getTotalDays(date);
+        long wholeDays = calendar().getTotalDays(date);
+
+        int hours = seasonsApi.getHours(world);
+        int minutes = seasonsApi.getMinutes(world);
+        int seconds = seasonsApi.getSeconds(world);
+        double dayFraction = (hours + minutes / 60.0 + seconds / 3600.0) / 24.0;
+
+        return wholeDays + dayFraction;
     }
 
     @Override

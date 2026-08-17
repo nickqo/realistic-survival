@@ -117,7 +117,7 @@ public final class FarmingListener implements Listener {
      */
     private boolean resolveFarmland(Block farmlandBlock) {
         Farmland data = (Farmland) farmlandBlock.getBlockData();
-        long currentDay = timeProvider.getCurrentDay(farmlandBlock.getWorld());
+        double currentDay = timeProvider.getCurrentDay(farmlandBlock.getWorld());
 
         boolean skyExposed = farmlandBlock.getRelative(BlockFace.UP).getLightFromSky() >= 15;
         boolean raining = timeProvider.isRaining(farmlandBlock.getWorld());
@@ -145,8 +145,8 @@ public final class FarmingListener implements Listener {
             return false;
         }
 
-        long drySince = readDrySince(farmlandBlock.getLocation(), currentDay);
-        long daysDry = currentDay - drySince;
+        double drySince = readDrySince(farmlandBlock.getLocation(), currentDay);
+        double daysDry = currentDay - drySince;
         if (daysDry < STRESS_DAYS_THRESHOLD) {
             return false;
         }
@@ -179,19 +179,19 @@ public final class FarmingListener implements Listener {
         }
     }
 
-    private void trackDrySince(Location farmlandLocation, long day) {
+    private void trackDrySince(Location farmlandLocation, double day) {
         PersistentDataContainer chunkPdc = farmlandLocation.getChunk().getPersistentDataContainer();
         NamespacedKey key = new NamespacedKey(plugin, DRY_SINCE_PREFIX + coordKey(farmlandLocation));
-        if (!chunkPdc.has(key, PersistentDataType.LONG)) {
-            chunkPdc.set(key, PersistentDataType.LONG, day);
+        if (!chunkPdc.has(key, PersistentDataType.DOUBLE)) {
+            chunkPdc.set(key, PersistentDataType.DOUBLE, day);
         }
         addToIndex(farmlandLocation);
     }
 
-    private long readDrySince(Location farmlandLocation, long fallback) {
+    private double readDrySince(Location farmlandLocation, double fallback) {
         PersistentDataContainer chunkPdc = farmlandLocation.getChunk().getPersistentDataContainer();
         NamespacedKey key = new NamespacedKey(plugin, DRY_SINCE_PREFIX + coordKey(farmlandLocation));
-        return chunkPdc.getOrDefault(key, PersistentDataType.LONG, fallback);
+        return chunkPdc.getOrDefault(key, PersistentDataType.DOUBLE, fallback);
     }
 
     private void untrack(Location farmlandLocation) {

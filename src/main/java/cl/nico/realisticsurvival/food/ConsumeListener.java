@@ -55,7 +55,7 @@ public final class ConsumeListener implements Listener {
                 ? player.getInventory().getItemInOffHand()
                 : player.getInventory().getItemInMainHand();
 
-        long currentDay = timeProvider.getCurrentDay(player.getWorld());
+        double currentDay = timeProvider.getCurrentDay(player.getWorld());
         int freshness = foodManager.calculateFreshness(handStack, currentDay, FoodManager.AMBIENT_MULTIPLIER);
         SpoilageTier tier = foodManager.getTier(freshness);
         boolean frozen = foodManager.isFrozen(handStack);

@@ -126,8 +126,12 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
      */
     private void currentDay(CommandSender sender) {
         World world = sender instanceof Player player ? player.getWorld() : Bukkit.getWorlds().get(0);
-        long day = timeProvider.getCurrentDay(world);
-        sender.sendMessage(Component.text("Dia in-game absoluto actual (" + world.getName() + "): " + day, NamedTextColor.AQUA));
+        double day = timeProvider.getCurrentDay(world);
+        // 2 decimales: alcanza para notar el avance entre dos ejecuciones separadas por
+        // unos minutos reales, y confirmar que el reloj efectivamente esta corriendo.
+        sender.sendMessage(Component.text(
+                String.format(Locale.ROOT, "Dia in-game absoluto actual (%s): %.2f", world.getName(), day),
+                NamedTextColor.AQUA));
     }
 
     private void setFreshness(CommandSender sender, Player player, ItemStack item, String rawValue) {
@@ -142,7 +146,7 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
         // Se usa el dia actual real (via TimeProvider) para el watermark, no un valor
         // arbitrario: asi la pudricion sigue avanzando con normalidad desde "ahora" en
         // vez de saltar a 0% en la proxima interaccion por un timestamp viejo artificial.
-        long currentDay = timeProvider.getCurrentDay(player.getWorld());
+        double currentDay = timeProvider.getCurrentDay(player.getWorld());
         foodManager.applyFreshness(item, value, currentDay);
 
         if (foodManager.getTier(value) == FoodManager.SpoilageTier.PODRIDO) {

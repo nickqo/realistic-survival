@@ -7,9 +7,11 @@
 El plugin depende de RealisticSeasons (RS) para el clima y la fecha, abstrayendo esta conexión para no acoplar el resto del código.
 
 - Abstracción (Interfaces): Todo el sistema le pide la hora a una interfaz `TimeProvider`. La clase `RSTimeHandler` implementa esta interfaz consultando la API de RS.
-- Unidad de Medida: El tiempo se mide y guarda en "Días In-Game absolutos".
-- Almacenamiento de Estado: Se guarda el `timestamp_creacion` o `ultimo_calculo` en el PersistentDataContainer (PDC) de los bloques y en los DataComponentTypes custom de los ítems.
+- Unidad de Medida: El tiempo se mide y guarda en "Días In-Game absolutos", **con precisión de hora** (`double`, ej. `572.34`) — no solo el número de día calendario. Se combina `Calendar#getTotalDays` (día entero) con `SeasonsAPI#getHours/getMinutes/getSeconds` (hora del día actual) para que la fracción decimal represente cuánto del día actual transcurrió.
+  - **Por qué:** si solo se midiera en días enteros, la pudrición quedaría "congelada" durante todo el día y saltaría de golpe recién al cruzar la medianoche in-game — nada progresivo, y particularmente mal ya que `RealisticSeasons` permite alargar/acortar la duración real de un día in-game por configuración. Con precisión de hora, una diferencia de medio día in-game (`0.5`) ya produce la mitad del deterioro correspondiente, sin importar cuántos minutos reales dure ese medio día.
+- Almacenamiento de Estado: Se guarda el `timestamp_creacion` o `ultimo_calculo` (como `double`, vía `PersistentDataType.DOUBLE`) en el PersistentDataContainer (PDC) de los bloques y en los DataComponentTypes custom de los ítems.
 - Cálculo Pasivo: Cuando un jugador abre un contenedor o interactúa con un ítem, el sistema resta el día actual menos el día guardado en los datos del objeto, ajustando el deterioro según la temperatura antes de mostrar el resultado.
+- Recursos discretos (Hielo, Cubos de Agua): a diferencia de la frescura (que es continua), el hielo/las cargas de agua no se pueden consumir en fracciones — un electrodoméstico/Aspersor con un tramo parcial de días fríos redondea el consumo **hacia arriba** (menos favorable, nunca deja un tramo sin proteger a costa de "ahorrar" combustible).
 
 ## 🥩 2. Sistema de Descomposición de Alimentos (Spoilage Tiers)
 El sistema interno maneja la frescura de la comida utilizando estrictamente decenas enteras (100, 90, 80, 70... 0%). Cualquier cálculo interno debe redondearse siempre a la decena más cercana.
