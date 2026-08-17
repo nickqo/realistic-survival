@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>cl.nico</groupId>
+    <artifactId>realisticsurvival</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>RealisticSurvival</name>
+    <description>
+        Plugin de Paper 1.21.x que introduce deterioro de alimentos, refrigeracion/congelacion
+        custom y agricultura estacional realista, integrado con RealisticSeasons.
+    </description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- Paper 1.21.x corre sobre Java 21 -->
+        <maven.compiler.release>21</maven.compiler.release>
+        <paper.api.version>1.21.10-R0.1-SNAPSHOT</paper.api.version>
+    </properties>
+
+    <repositories>
+        <!-- Repositorio oficial de PaperMC -->
+        <repository>
+            <id>papermc</id>
+            <url>https://repo.papermc.io/repository/maven-public/</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <!-- Paper API 1.21.x -->
+        <dependency>
+            <groupId>io.papermc.paper</groupId>
+            <artifactId>paper-api</artifactId>
+            <version>${paper.api.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!--
+            RealisticSeasons (dependencia externa fuerte / hard dependency).
+
+            RealisticSeasons NO publica un repositorio Maven publico (su propia
+            documentacion indica "Maven is still a work in progress"), por lo que se
+            referencia como un jar local bajo scope "system".
+
+            Pasos para compilar:
+              1) Descarga el jar de RealisticSeasons (SpigotMC / Polymart / BuiltByBit).
+              2) Colocalo en: libs/RealisticSeasons.jar  (ver libs/README.md)
+
+            En runtime, el jar real de RealisticSeasons debe estar en la carpeta
+            "plugins/" del servidor Paper. RealisticSurvival lo declara como
+            "depend" (hard dependency) en plugin.yml, por lo que el servidor no
+            cargara este plugin si RealisticSeasons no esta presente.
+        -->
+        <dependency>
+            <groupId>me.casperge</groupId>
+            <artifactId>realisticseasons</artifactId>
+            <version>local</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/libs/RealisticSeasons.jar</systemPath>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>${project.name}-${project.version}</finalName>
+        <defaultGoal>clean package</defaultGoal>
+
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                    <compilerArgs>
+                        <arg>-Xlint:deprecation</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <!-- Copia plugin.yml a target/classes procesando variables ${project.version} -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-resources</id>
+                        <phase>process-resources</phase>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
+    </build>
+</project>
