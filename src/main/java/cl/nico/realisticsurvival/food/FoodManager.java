@@ -1,5 +1,6 @@
 package cl.nico.realisticsurvival.food;
 
+import cl.nico.realisticsurvival.util.PdcCompat;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.FoodProperties;
 import net.kyori.adventure.text.Component;
@@ -511,7 +512,7 @@ public final class FoodManager {
 
     private double readOrInitFreezeStartDay(ItemStack item, double currentDay) {
         PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
-        Double existing = pdc.get(keyFreezeStartDay, PersistentDataType.DOUBLE);
+        Double existing = PdcCompat.readDayOrNull(pdc, keyFreezeStartDay);
         if (existing != null) {
             return existing;
         }
@@ -521,7 +522,7 @@ public final class FoodManager {
 
     private double readOrInitThawStartDay(ItemStack item, double currentDay) {
         PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
-        Double existing = pdc.get(keyThawStartDay, PersistentDataType.DOUBLE);
+        Double existing = PdcCompat.readDayOrNull(pdc, keyThawStartDay);
         if (existing != null) {
             return existing;
         }
@@ -530,8 +531,7 @@ public final class FoodManager {
     }
 
     private double readLastCalcDay(ItemStack item, double fallback) {
-        return item.getItemMeta().getPersistentDataContainer()
-                .getOrDefault(keyLastCalcDay, PersistentDataType.DOUBLE, fallback);
+        return PdcCompat.readDay(item.getItemMeta().getPersistentDataContainer(), keyLastCalcDay, fallback);
     }
 
     private void writeLastCalcDay(ItemStack item, double day) {

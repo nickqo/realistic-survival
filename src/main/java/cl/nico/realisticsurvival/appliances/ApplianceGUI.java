@@ -2,6 +2,7 @@ package cl.nico.realisticsurvival.appliances;
 
 import cl.nico.realisticsurvival.api.time.TimeProvider;
 import cl.nico.realisticsurvival.appliances.ApplianceManager.ApplianceType;
+import cl.nico.realisticsurvival.util.PdcCompat;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -134,7 +135,7 @@ public final class ApplianceGUI implements Listener {
     private double readLastCalcDay(Location applianceLocation, double fallback) {
         PersistentDataContainer chunkPdc = applianceLocation.getChunk().getPersistentDataContainer();
         String prefix = ApplianceManager.applianceKeyPrefix(applianceLocation);
-        return chunkPdc.getOrDefault(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.DOUBLE, fallback);
+        return PdcCompat.readDay(chunkPdc, new NamespacedKey(plugin, prefix + "_last_day"), fallback);
     }
 
     /**

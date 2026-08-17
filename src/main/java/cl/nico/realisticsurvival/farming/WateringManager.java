@@ -1,6 +1,7 @@
 package cl.nico.realisticsurvival.farming;
 
 import cl.nico.realisticsurvival.api.time.TimeProvider;
+import cl.nico.realisticsurvival.util.PdcCompat;
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.CustomModelData;
 import net.kyori.adventure.text.Component;
@@ -361,9 +362,9 @@ public final class WateringManager implements Listener {
         NamespacedKey fractionKey = new NamespacedKey(plugin, prefix + "_charge_fraction");
 
         double currentDay = timeProvider.getCurrentDay(sprinklerLocation.getWorld());
-        double lastDay = chunkPdc.getOrDefault(lastDayKey, PersistentDataType.DOUBLE, currentDay);
+        double lastDay = PdcCompat.readDay(chunkPdc, lastDayKey, currentDay);
         int charges = chunkPdc.getOrDefault(chargesKey, PersistentDataType.INTEGER, 0);
-        double fractionProgress = chunkPdc.getOrDefault(fractionKey, PersistentDataType.DOUBLE, 0.0);
+        double fractionProgress = PdcCompat.readDay(chunkPdc, fractionKey, 0.0);
 
         double elapsedDays = Math.max(0.0, currentDay - lastDay);
         double coldDays = Math.min(elapsedDays, charges);

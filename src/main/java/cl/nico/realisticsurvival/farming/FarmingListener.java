@@ -1,6 +1,7 @@
 package cl.nico.realisticsurvival.farming;
 
 import cl.nico.realisticsurvival.api.time.TimeProvider;
+import cl.nico.realisticsurvival.util.PdcCompat;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
@@ -182,7 +183,7 @@ public final class FarmingListener implements Listener {
     private void trackDrySince(Location farmlandLocation, double day) {
         PersistentDataContainer chunkPdc = farmlandLocation.getChunk().getPersistentDataContainer();
         NamespacedKey key = new NamespacedKey(plugin, DRY_SINCE_PREFIX + coordKey(farmlandLocation));
-        if (!chunkPdc.has(key, PersistentDataType.DOUBLE)) {
+        if (!PdcCompat.hasDay(chunkPdc, key)) {
             chunkPdc.set(key, PersistentDataType.DOUBLE, day);
         }
         addToIndex(farmlandLocation);
@@ -191,7 +192,7 @@ public final class FarmingListener implements Listener {
     private double readDrySince(Location farmlandLocation, double fallback) {
         PersistentDataContainer chunkPdc = farmlandLocation.getChunk().getPersistentDataContainer();
         NamespacedKey key = new NamespacedKey(plugin, DRY_SINCE_PREFIX + coordKey(farmlandLocation));
-        return chunkPdc.getOrDefault(key, PersistentDataType.DOUBLE, fallback);
+        return PdcCompat.readDay(chunkPdc, key, fallback);
     }
 
     private void untrack(Location farmlandLocation) {
