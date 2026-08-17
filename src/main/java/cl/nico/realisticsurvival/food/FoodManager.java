@@ -184,6 +184,24 @@ public final class FoodManager {
     }
 
     /**
+     * Lee el valor "crudo" (continuo, sin redondear a la decena) persistido en
+     * {@code keyDebugRawX100}, usado como base real para el proximo catch-up (ver
+     * {@link #calculateFreshness}). Distinto de {@link #getStoredFreshness}, que devuelve
+     * el valor YA redondeado (para tier/gameplay/Lore) — ese redondeado nunca debe
+     * retroalimentar el calculo de decaimiento, solo mostrarse. Se guarda siempre junto con
+     * {@code keyFreshness} en {@link #applyFreshness}, asi que si el item esta trackeado
+     * este campo tambien existe.
+     */
+    private double readRawFreshness(ItemStack item) {
+        if (!isTracked(item)) {
+            return 100.0;
+        }
+        long rawTimes100 = item.getItemMeta().getPersistentDataContainer()
+                .getOrDefault(keyDebugRawX100, PersistentDataType.LONG, getStoredFreshness(item) * 100L);
+        return rawTimes100 / 100.0;
+    }
+
+    /**
      * Calculo pasivo (catch-up): resuelve la frescura actual del item en base al timestamp
      * (dia in-game) guardado en su PDC vs. el dia actual entregado por TimeProvider,
      * ajustando segun el almacenamiento. Se invoca al interactuar con el item (abrir
@@ -258,7 +276,16 @@ public final class FoodManager {
             clearFreezeProgress(item);
         }
 
-        int stored = getStoredFreshness(item);
+        // OJO: la base para el proximo calculo tiene que ser el valor CRUDO (continuo) de
+        // la ultima vez, no el redondeado (keyFreshness). Si se usara el redondeado, cada
+        // vez que el redondeo "sube" (ej. 59.26% -> 60% oficial) esa suba de hasta 4.99
+        // puntos quedaria fijada permanentemente como nuevo punto de partida, y el
+        // siguiente catch-up (aunque reste correctamente) arrancaria desde un valor mas
+        // alto del que realmente correspondia — visualmente parece que la comida "sana"
+        // un poco en cada apertura seguida, cuando en realidad es el redondeo hacia arriba
+        // "regalando" frescura de forma acumulativa. Por eso la base real es siempre el
+        // crudo persistido (keyDebugRawX100), y el redondeado es puramente derivado/visual.
+        double stored = readRawFreshness(item);
         double lastCalcDay = readLastCalcDay(item, currentDay);
         double elapsedDays = Math.max(0.0, currentDay - lastCalcDay);
 

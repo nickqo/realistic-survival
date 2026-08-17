@@ -19,6 +19,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -43,10 +44,15 @@ import java.util.UUID;
  * {@link CatchUpProcessor}) — cero ticking activo, todo reactivo a eventos.
  * <p>
  * <b>Nota importante:</b> {@code Material.BARRIER} es irrompible en supervivencia (dureza
- * -1), por lo que {@link org.bukkit.event.block.BlockBreakEvent} nunca llega a dispararse
- * sobre el. Por eso "romper" el electrodomestico se resuelve con un click izquierdo
- * ({@link Action#LEFT_CLICK_BLOCK}) sobre la barrera en {@link #onInteract}, en vez de un
- * listener de {@code BlockBreakEvent} (que jamas se ejecutaria para este bloque).
+ * -1), por lo que {@link BlockBreakEvent} nunca llega a dispararse ahi. Por eso "romper" el
+ * electrodomestico en supervivencia se resuelve con un click izquierdo
+ * ({@link Action#LEFT_CLICK_BLOCK}) + picota sobre la barrera en {@link #onInteract}. Pero
+ * en modo CREATIVO, Minecraft SI permite romper bloques normalmente irrompibles como
+ * Barrier con un solo click (sin picota) — eso SI dispara {@link BlockBreakEvent} (ver
+ * {@link #onBlockBreak}), un camino totalmente distinto al de supervivencia. Si no se
+ * escuchara ese evento, el bloque se rompe pero el {@link ItemDisplay}/PDC quedan huerfanos
+ * (bug real: "bloque fantasma" flotando sin hitbox). Se deja romper libre en creativo (igual
+ * que cualquier bloque vanilla ahi, sin picota) pero corriendo la misma limpieza.
  * <p>
  * <b>Compatibilidad sin Resource Pack:</b> el {@link ItemDisplay} usa como base el
  * {@link ApplianceType#getFallbackMaterial()} de cada tipo (Dropper para el Refrigerador,
@@ -219,7 +225,40 @@ public final class ApplianceManager implements Listener {
         }
     }
 
+    /** Rotura manual en supervivencia (click izquierdo + picota, ver {@link #onInteract}). */
     private void breakAppliance(Player player, Block barrierBlock) {
+        ApplianceType type = cleanupAppliance(barrierBlock);
+        if (type != null && player.getGameMode() != GameMode.CREATIVE) {
+            barrierBlock.getWorld().dropItemNaturally(
+                    barrierBlock.getLocation().clone().add(0.5, 0.5, 0.5), createApplianceItem(type));
+        }
+    }
+
+    /**
+     * Rotura instantanea en modo creativo (ver Javadoc de la clase): Minecraft ya rompe el
+     * Barrier solo, asi que aca solo hace falta la limpieza — sin dropear el item fisico,
+     * igual que cualquier bloque roto en creativo vanilla.
+     */
+    @EventHandler
+    public void onBlockBreak(BlockBreakEvent event) {
+        Block block = event.getBlock();
+        if (block.getType() != Material.BARRIER || !isTrackedAppliance(block.getLocation())) {
+            return;
+        }
+        event.setDropItems(false);
+        cleanupAppliance(block);
+    }
+
+    /**
+     * Limpieza compartida entre la rotura manual (supervivencia) y la instantanea
+     * (creativo): despawnea el {@link ItemDisplay}, vuelca el inventario virtual como
+     * drops, y borra el estado del PDC del chunk. NO decide si se devuelve el item fisico
+     * — eso lo resuelve cada llamador segun el modo de juego.
+     *
+     * @return el {@link ApplianceType} que tenia el bloque, o {@code null} si por algun
+     *         motivo ya no estaba trackeado.
+     */
+    private ApplianceType cleanupAppliance(Block barrierBlock) {
         Location location = barrierBlock.getLocation();
         ApplianceType type = readBlockApplianceType(location);
 
@@ -232,10 +271,7 @@ public final class ApplianceManager implements Listener {
         chunkPdc.remove(new NamespacedKey(plugin, prefix + "_display_uuid"));
 
         barrierBlock.setType(Material.AIR);
-
-        if (type != null && player.getGameMode() != GameMode.CREATIVE) {
-            barrierBlock.getWorld().dropItemNaturally(location.clone().add(0.5, 0.5, 0.5), createApplianceItem(type));
-        }
+        return type;
     }
 
     public boolean isTrackedAppliance(Location barrierLocation) {

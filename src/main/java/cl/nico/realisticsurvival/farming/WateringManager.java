@@ -21,6 +21,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
@@ -174,6 +175,25 @@ public final class WateringManager implements Listener {
         return item != null && Tag.ITEMS_PICKAXES.isTagged(item.getType());
     }
 
+    /**
+     * Rotura instantanea en modo creativo: a diferencia de supervivencia (donde Barrier es
+     * irrompible y por eso {@link #onBreakSprinkler} usa {@code LEFT_CLICK_BLOCK} + picota),
+     * en creativo Minecraft rompe Barrier con un solo click sin picota, lo que SI dispara
+     * {@link BlockBreakEvent}. Sin este listener, el bloque desaparece pero el
+     * {@link ItemDisplay}/PDC quedan huerfanos ("bloque fantasma"). Se deja romper libre
+     * (igual que cualquier bloque en creativo) pero corriendo la misma limpieza, sin
+     * dropear el item fisico (creativo no dropea nada al romper).
+     */
+    @EventHandler
+    public void onBlockBreak(BlockBreakEvent event) {
+        Block block = event.getBlock();
+        if (block.getType() != Material.BARRIER || !isTrackedSprinkler(block.getLocation())) {
+            return;
+        }
+        event.setDropItems(false);
+        cleanupSprinkler(block);
+    }
+
     private void handleWateringCanUse(PlayerInteractEvent event, ItemStack can) {
         Block clicked = event.getClickedBlock();
         if (clicked == null || event.getAction() != Action.RIGHT_CLICK_BLOCK) {
@@ -252,13 +272,23 @@ public final class WateringManager implements Listener {
         }
     }
 
-    /**
-     * Rompe un Aspersor colocado: remueve la Barrera, la entidad {@link ItemDisplay} y el
-     * estado guardado en el PDC del chunk, y devuelve el item (con la carga de agua
-     * pendiente perdida — simplificacion deliberada, no se convierte de vuelta a Cubos de
-     * Agua).
-     */
+    /** Rotura manual en supervivencia (click izquierdo + picota, ver {@link #onBreakSprinkler}). */
     private void breakSprinkler(Player player, Block barrierBlock) {
+        cleanupSprinkler(barrierBlock);
+        if (player.getGameMode() != GameMode.CREATIVE) {
+            barrierBlock.getWorld().dropItemNaturally(
+                    barrierBlock.getLocation().clone().add(0.5, 0.5, 0.5), createSprinklerItem());
+        }
+    }
+
+    /**
+     * Limpieza compartida entre la rotura manual (supervivencia) y la instantanea
+     * (creativo, ver {@link #onBlockBreak}): remueve la Barrera, la entidad
+     * {@link ItemDisplay} y el estado guardado en el PDC del chunk (la carga de agua
+     * pendiente se pierde — simplificacion deliberada, no se convierte de vuelta a Cubos
+     * de Agua). NO decide si se devuelve el item fisico — eso lo resuelve cada llamador.
+     */
+    private void cleanupSprinkler(Block barrierBlock) {
         Location location = barrierBlock.getLocation();
         despawnSprinklerDisplay(location);
 
@@ -270,10 +300,6 @@ public final class WateringManager implements Listener {
         chunkPdc.remove(new NamespacedKey(plugin, prefix + "_display_uuid"));
 
         barrierBlock.setType(Material.AIR);
-
-        if (player.getGameMode() != GameMode.CREATIVE) {
-            barrierBlock.getWorld().dropItemNaturally(location.clone().add(0.5, 0.5, 0.5), createSprinklerItem());
-        }
     }
 
     private void despawnSprinklerDisplay(Location barrierLocation) {
