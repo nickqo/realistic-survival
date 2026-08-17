@@ -5,6 +5,7 @@ import cl.nico.realisticsurvival.api.time.TimeProvider;
 import cl.nico.realisticsurvival.appliances.ApplianceGUI;
 import cl.nico.realisticsurvival.appliances.ApplianceManager;
 import cl.nico.realisticsurvival.appliances.CatchUpProcessor;
+import cl.nico.realisticsurvival.commands.RSDebugCommand;
 import cl.nico.realisticsurvival.commands.RSGiveCommand;
 import cl.nico.realisticsurvival.farming.FarmingListener;
 import cl.nico.realisticsurvival.farming.WateringManager;
@@ -77,6 +78,15 @@ public final class RealisticSurvival extends JavaPlugin {
             rsgive.setTabCompleter(giveCommand);
         } else {
             getLogger().warning("No se pudo registrar /rsgive: revisa plugin.yml.");
+        }
+
+        RSDebugCommand debugCommand = new RSDebugCommand(foodManager, timeProvider);
+        PluginCommand rsdebug = getCommand("rsdebug");
+        if (rsdebug != null) {
+            rsdebug.setExecutor(debugCommand);
+            rsdebug.setTabCompleter(debugCommand);
+        } else {
+            getLogger().warning("No se pudo registrar /rsdebug: revisa plugin.yml.");
         }
 
         // --- recetas ---

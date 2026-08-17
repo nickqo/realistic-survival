@@ -15,8 +15,15 @@ commands:
     description: Entrega electrodomesticos o herramientas de riego custom del plugin.
     usage: /<command> <fridge|freezer|wateringcan|sprinkler> [jugador]
     permission: realisticsurvival.give
+  rsdebug:
+    description: Fuerza la frescura/congelado del item en mano, para testear sin esperar dias in-game reales.
+    usage: /<command> setfreshness <0-100> | setfrozen <true|false>
+    permission: realisticsurvival.debug
 
 permissions:
   realisticsurvival.give:
     description: Permite usar /rsgive para obtener items custom del plugin.
+    default: op
+  realisticsurvival.debug:
+    description: Permite usar /rsdebug para forzar el estado de frescura de un item.
     default: op

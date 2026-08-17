@@ -2,6 +2,9 @@ package cl.nico.realisticsurvival.food;
 
 import io.papermc.paper.datacomponent.DataComponentTypes;
 import io.papermc.paper.datacomponent.item.FoodProperties;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.inventory.ItemStack;
@@ -9,7 +12,9 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -239,19 +244,23 @@ public final class FoodManager {
     }
 
     /**
-     * Escribe la frescura en el PDC del item y actualiza los DataComponentTypes visuales
-     * ({@code minecraft:max_damage} / {@code minecraft:damage}). Si la frescura llega a 0
-     * solo limpia la barra visual (seccion 2: "Podrido: Sin barra) — NO transforma el
-     * Material: eso es responsabilidad explicita de {@link #transformToRotten}, que el
-     * llamador debe invocar cuando corresponda (ver {@link #calculateFreshness}).
+     * Escribe la frescura en el PDC del item y actualiza tanto la barra de daño visual
+     * ({@code minecraft:max_damage} / {@code minecraft:damage}) como una linea de Lore en
+     * texto plano ("Frescura: 70% (Pasado)") — la barra sola es sutil y facil de pasar por
+     * alto al testear, el Lore la hace inequivoca. Si la frescura llega a 0 solo limpia la
+     * barra visual (seccion 2: "Podrido: Sin barra") — NO transforma el Material: eso es
+     * responsabilidad explicita de {@link #transformToRotten}, que el llamador debe invocar
+     * cuando corresponda (ver {@link #calculateFreshness}).
      */
     public void applyFreshness(ItemStack item, int freshness, long currentDay) {
         int clamped = Math.max(0, Math.min(100, roundToNearestTen(freshness)));
+        boolean frozen = isFrozen(item);
 
         item.editMeta(meta -> {
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(keyFreshness, PersistentDataType.INTEGER, clamped);
             pdc.set(keyLastCalcDay, PersistentDataType.LONG, currentDay);
+            meta.lore(buildFreshnessLore(clamped, frozen));
         });
 
         if (clamped <= 0) {
@@ -263,6 +272,37 @@ public final class FoodManager {
         int damage = (DAMAGE_BAR_RESOLUTION * (100 - clamped)) / 100;
         item.setData(DataComponentTypes.MAX_DAMAGE, DAMAGE_BAR_RESOLUTION);
         item.setData(DataComponentTypes.DAMAGE, damage);
+    }
+
+    /**
+     * Construye el Lore de frescura/congelado. Centralizado aca para que
+     * {@link #applyFreshness} y {@link #setFrozen} (que puede cambiar el estado congelado
+     * sin pasar por applyFreshness, ver la rama "enteringFreezer" de
+     * {@link #calculateFreshness}) siempre muestren texto consistente.
+     */
+    private List<Component> buildFreshnessLore(int freshness, boolean frozen) {
+        SpoilageTier tier = getTier(freshness);
+        NamedTextColor color = switch (tier) {
+            case FRESCO -> NamedTextColor.GREEN;
+            case PASADO -> NamedTextColor.YELLOW;
+            case MAL_ESTADO -> NamedTextColor.RED;
+            case PODRIDO -> NamedTextColor.DARK_GRAY;
+        };
+        String label = switch (tier) {
+            case FRESCO -> "Fresco";
+            case PASADO -> "Pasado";
+            case MAL_ESTADO -> "Mal Estado";
+            case PODRIDO -> "Podrido";
+        };
+
+        List<Component> lore = new ArrayList<>();
+        lore.add(Component.text("Frescura: " + freshness + "% (" + label + ")", color)
+                .decoration(TextDecoration.ITALIC, false));
+        if (frozen) {
+            lore.add(Component.text("❄ Congelado", NamedTextColor.AQUA)
+                    .decoration(TextDecoration.ITALIC, false));
+        }
+        return lore;
     }
 
     /**
@@ -283,7 +323,12 @@ public final class FoodManager {
         }
 
         ItemStack rotten = new ItemStack(Material.ROTTEN_FLESH, item.getAmount());
-        rotten.editMeta(meta -> meta.getPersistentDataContainer().set(keyFreshness, PersistentDataType.INTEGER, 0));
+        rotten.editMeta(meta -> {
+            meta.displayName(Component.text("Restos Podridos", NamedTextColor.DARK_GRAY)
+                    .decoration(TextDecoration.ITALIC, false));
+            meta.lore(buildFreshnessLore(0, false));
+            meta.getPersistentDataContainer().set(keyFreshness, PersistentDataType.INTEGER, 0);
+        });
         return rotten;
     }
 
@@ -297,12 +342,20 @@ public final class FoodManager {
     }
 
     /**
-     * Aplica/remueve el flag custom {@code frozen} (item congelado) en el PDC del item.
+     * Aplica/remueve el flag custom {@code frozen} (item congelado) en el PDC del item, y
+     * refresca el Lore para reflejarlo de inmediato (ver {@link #buildFreshnessLore}) — este
+     * metodo se llama a veces sin pasar por {@link #applyFreshness} (ej. al entrar a un
+     * Congelador), asi que es el unico punto que puede tocar el flag {@code frozen}.
      * Un item congelado no pierde frescura (ver appliances.CatchUpProcessor) pero al
      * cocinarse/consumirse sus valores nutricionales caen al 20%.
      */
     public void setFrozen(ItemStack item, boolean frozen) {
-        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyFrozen, PersistentDataType.BOOLEAN, frozen));
+        item.editMeta(meta -> {
+            PersistentDataContainer pdc = meta.getPersistentDataContainer();
+            pdc.set(keyFrozen, PersistentDataType.BOOLEAN, frozen);
+            int freshness = pdc.getOrDefault(keyFreshness, PersistentDataType.INTEGER, 100);
+            meta.lore(buildFreshnessLore(freshness, frozen));
+        });
     }
 
     public boolean isFrozen(ItemStack item) {
