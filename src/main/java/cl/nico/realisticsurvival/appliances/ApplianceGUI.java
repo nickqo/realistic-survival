@@ -85,6 +85,17 @@ public final class ApplianceGUI implements Listener {
     }
 
     /**
+     * Indica si un {@link Inventory} es el de un electrodomestico gestionado por esta
+     * clase. Usado por {@code inventory.InventoryListener} para NO aplicar su catch-up
+     * ambiente generico (el electrodomestico ya corrio su propio catch-up con el
+     * multiplicador frio correspondiente en {@link #open}) sobre este inventario en
+     * particular al abrirse.
+     */
+    public boolean isManagedByAppliance(Inventory inventory) {
+        return inventory.getHolder() instanceof ApplianceHolder;
+    }
+
+    /**
      * Vuelca el inventario de un electrodomestico como drops en el mundo y limpia su
      * estado del PDC del chunk. Usado por {@link ApplianceManager} al romper el bloque.
      */

@@ -17,11 +17,16 @@ import org.bukkit.inventory.ItemStack;
  * No hay ningun {@code BukkitRunnable} periodico: este procesador solo se ejecuta cuando
  * {@link ApplianceGUI#open} lo invoca, nunca en background.
  * <p>
- * Nota de diseño: mientras el electrodomestico esta cerrado es el UNICO momento en que su
- * contenido puede cambiar (no hay forma de tocarlo sin abrir la GUI), por lo que el
- * "ultimo dia calculado" del electrodomestico coincide siempre con el watermark interno de
- * cada item que contiene — esto permite tratar el periodo frio/ambiente como un tramo unico
- * y consistente para todos los slots, sin arrastrar datos obsoletos.
+ * <b>Items que entran "viejos":</b> un item puede llegar al electrodomestico con su propio
+ * watermark interno mas atrasado que el {@code lastCalcDay} del electrodomestico — ej. un
+ * alimento que llevaba mucho tiempo quieto en el inventario del jugador sin que nada lo
+ * recalculara (ver {@code inventory.InventoryListener}), y recien se toca al insertarlo.
+ * Por eso, antes de aplicar el tramo frio/ambiente del periodo reciente, cada item se
+ * "sincroniza" primero hasta {@code lastCalcDay} a velocidad AMBIENTE (nunca con el
+ * multiplicador frio, porque no hay forma de saber si ese tramo previo estuvo protegido).
+ * Si el item ya estaba sincronizado (caso normal: watermark == lastCalcDay), este paso no
+ * hace nada. Sin este paso, un item "viejo" se pudriria instantaneamente al primer catch-up
+ * (el multiplicador frio no alcanza a compensar un backlog de cientos de dias).
  */
 public final class CatchUpProcessor {
 
@@ -46,10 +51,7 @@ public final class CatchUpProcessor {
      *                   {@link FoodManager#FRIDGE_MULTIPLIER})
      */
     public void process(ItemStack[] contents, long lastCalcDay, long currentDay, boolean isFreezer) {
-        long elapsedDays = currentDay - lastCalcDay;
-        if (elapsedDays <= 0) {
-            return;
-        }
+        long elapsedDays = Math.max(0, currentDay - lastCalcDay);
 
         ItemStack fuel = contents[ApplianceGUI.FUEL_SLOT];
         long iceDaysAvailable = (fuel == null) ? 0 : fuel.getAmount();
@@ -62,6 +64,12 @@ public final class CatchUpProcessor {
             if (stack == null || (!foodManager.isTrackable(stack) && !foodManager.isTracked(stack))) {
                 continue;
             }
+
+            // Sincroniza hasta lastCalcDay a velocidad ambiente (ver Javadoc de la clase);
+            // no-op si el item ya estaba al dia.
+            int synced = foodManager.calculateFreshness(stack, lastCalcDay, FoodManager.AMBIENT_MULTIPLIER);
+            stack = transformIfRotten(stack, synced);
+
             if (coldDays > 0) {
                 int fresh = foodManager.calculateFreshness(stack, lastCalcDay + coldDays, coldMultiplier);
                 stack = transformIfRotten(stack, fresh);
