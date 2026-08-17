@@ -54,6 +54,15 @@ public final class FoodManager {
     /** Dias in-game a temperatura ambiente para que un item pierda el flag {@code frozen}. */
     public static final int THAW_DAYS = 1;
 
+    /**
+     * Dias in-game continuos dentro de un Congelador antes de que un item termine de
+     * congelarse (flag {@code frozen} pasa a true) — simetrico a {@link #THAW_DAYS}.
+     * Mientras dura este periodo de "enfriamiento", el item decae como en un Refrigerador
+     * ({@link #FRIDGE_MULTIPLIER}) en vez de detenerse por completo de inmediato: congelar
+     * algo del todo no es instantaneo.
+     */
+    public static final int FREEZE_DAYS = 1;
+
     /** Dias que tarda en pudrirse por completo (100% -> 0%) un alimento no listado explicitamente. */
     private static final int DEFAULT_DECAY_DAYS = 8;
 
@@ -102,6 +111,7 @@ public final class FoodManager {
     private final NamespacedKey keyLastCalcDay;
     private final NamespacedKey keyFrozen;
     private final NamespacedKey keyThawStartDay;
+    private final NamespacedKey keyFreezeStartDay;
     private final NamespacedKey keyDebugRawX100;
 
     /**
@@ -117,6 +127,7 @@ public final class FoodManager {
         this.keyLastCalcDay = new NamespacedKey(plugin, "last_calc_day");
         this.keyFrozen = new NamespacedKey(plugin, "frozen");
         this.keyThawStartDay = new NamespacedKey(plugin, "thaw_start_day");
+        this.keyFreezeStartDay = new NamespacedKey(plugin, "freeze_start_day");
         this.keyDebugRawX100 = new NamespacedKey(plugin, "debug_raw_freshness_x100");
     }
 
@@ -203,16 +214,32 @@ public final class FoodManager {
         boolean enteringFreezer = Double.isInfinite(storageMultiplier);
 
         if (enteringFreezer) {
-            // Congelador: se detiene la pudricion por completo y se marca frozen=true.
-            setFrozen(item, true);
-            clearThawProgress(item);
-            // El watermark se mueve a "ahora" para que, si sale del frio, la pudricion
-            // continue desde este punto y no desde la ultima vez a temperatura ambiente.
-            writeLastCalcDay(item, currentDay);
-            return getStoredFreshness(item);
-        }
+            if (isFrozen(item)) {
+                // Ya estaba congelado del todo: se mantiene, no pudre, solo se actualiza
+                // el watermark para que la pudricion siga desde aca si sale del frio.
+                writeLastCalcDay(item, currentDay);
+                return getStoredFreshness(item);
+            }
 
-        if (isFrozen(item)) {
+            // Aun no esta congelado: hace falta FREEZE_DAYS continuos de frio para
+            // terminar de congelarse (simetrico a THAW_DAYS). Mientras tanto decae como
+            // un Refrigerador (x3) en vez de detenerse de golpe — enfriar algo del todo
+            // no es instantaneo.
+            double freezeStart = readOrInitFreezeStartDay(item, currentDay);
+            double daysFreezing = currentDay - freezeStart;
+            if (daysFreezing >= FREEZE_DAYS) {
+                setFrozen(item, true);
+                clearFreezeProgress(item);
+                writeLastCalcDay(item, currentDay);
+                return getStoredFreshness(item);
+            }
+            storageMultiplier = FRIDGE_MULTIPLIER;
+        } else if (isFrozen(item)) {
+            // Salio del frio sin haber terminado de congelarse del todo en algun momento
+            // previo (o esta descongelandose ahora): limpia cualquier progreso de
+            // enfriamiento pendiente, ya no aplica.
+            clearFreezeProgress(item);
+
             double thawStart = readOrInitThawStartDay(item, currentDay);
             double daysThawing = currentDay - thawStart;
             if (daysThawing < THAW_DAYS) {
@@ -224,6 +251,11 @@ public final class FoodManager {
             setFrozen(item, false);
             clearThawProgress(item);
             writeLastCalcDay(item, thawStart + THAW_DAYS);
+        } else {
+            // Caso normal (ambiente o Refrigerador, nunca estuvo congelado): se limpia
+            // cualquier progreso de enfriamiento viejo por las dudas (ej. si salio de un
+            // Congelador a mitad de camino y volvio a entrar mas tarde, arranca de cero).
+            clearFreezeProgress(item);
         }
 
         int stored = getStoredFreshness(item);
@@ -425,6 +457,20 @@ public final class FoodManager {
 
     private void clearThawProgress(ItemStack item) {
         item.editMeta(meta -> meta.getPersistentDataContainer().remove(keyThawStartDay));
+    }
+
+    private void clearFreezeProgress(ItemStack item) {
+        item.editMeta(meta -> meta.getPersistentDataContainer().remove(keyFreezeStartDay));
+    }
+
+    private double readOrInitFreezeStartDay(ItemStack item, double currentDay) {
+        PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
+        Double existing = pdc.get(keyFreezeStartDay, PersistentDataType.DOUBLE);
+        if (existing != null) {
+            return existing;
+        }
+        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyFreezeStartDay, PersistentDataType.DOUBLE, currentDay));
+        return currentDay;
     }
 
     private double readOrInitThawStartDay(ItemStack item, double currentDay) {

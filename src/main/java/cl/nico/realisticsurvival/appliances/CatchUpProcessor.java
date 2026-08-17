@@ -27,6 +27,13 @@ import org.bukkit.inventory.ItemStack;
  * Si el item ya estaba sincronizado (caso normal: watermark == lastCalcDay), este paso no
  * hace nada. Sin este paso, un item "viejo" se pudriria instantaneamente al primer catch-up
  * (el multiplicador frio no alcanza a compensar un backlog de cientos de dias).
+ * <p>
+ * <b>Consumo fraccionario de hielo:</b> el hielo es un recurso discreto (no se puede gastar
+ * "0.3 hielo"), pero los dias frios se calculan con precision de hora. En vez de redondear
+ * hacia arriba en cada apertura (eso gastaria un hielo entero cada vez que se reabre el
+ * electrodomestico, aunque sea a los pocos segundos), el progreso fraccionario se acumula
+ * entre aperturas via {@code iceFractionProgress} y solo se consume un hielo entero cuando
+ * el acumulado realmente cruza un dia completo.
  */
 public final class CatchUpProcessor {
 
@@ -47,19 +54,24 @@ public final class CatchUpProcessor {
      * @param lastCalcDay dia in-game (con fraccion horaria) en que se calculo por ultima
      *                    vez (al cerrar la GUI)
      * @param currentDay dia in-game absoluto actual (con fraccion horaria)
+     * @param iceFractionProgress dias frios acumulados que todavia no alcanzaron a
+     *                    consumir un hielo entero (ver {@link #process} para el porque);
+     *                    0.0 si nunca se acumulo nada.
      * @param isFreezer  true si es Congelador (frio = detiene pudricion + marca frozen),
      *                   false si es Refrigerador (frio = x3 duracion, ver
      *                   {@link FoodManager#FRIDGE_MULTIPLIER})
+     * @return el nuevo {@code iceFractionProgress} (el sobrante que aun no llego a
+     *         consumir un hielo entero) — el llamador debe persistirlo y pasarlo de vuelta
+     *         en la proxima llamada.
      */
-    public void process(ItemStack[] contents, double lastCalcDay, double currentDay, boolean isFreezer) {
+    public double process(ItemStack[] contents, double lastCalcDay, double currentDay,
+                           double iceFractionProgress, boolean isFreezer) {
         double elapsedDays = Math.max(0.0, currentDay - lastCalcDay);
 
         ItemStack fuel = contents[ApplianceGUI.FUEL_SLOT];
         double iceDaysAvailable = (fuel == null) ? 0 : fuel.getAmount();
         // coldDays queda fraccionario (protege exactamente el tiempo transcurrido, hasta
-        // el tope de hielo disponible) — el consumo de hielo en si, mas abajo, redondea
-        // hacia arriba porque el hielo es un recurso discreto (no se puede gastar "0.3
-        // hielo"): se prefiere gastar de mas antes que dejar un tramo parcial sin proteger.
+        // el tope de hielo disponible).
         double coldDays = Math.min(elapsedDays, iceDaysAvailable);
         double ambientDays = elapsedDays - coldDays;
         double coldMultiplier = isFreezer ? FoodManager.FREEZER_MULTIPLIER : FoodManager.FRIDGE_MULTIPLIER;
@@ -89,15 +101,18 @@ public final class CatchUpProcessor {
             contents[slot] = stack;
         }
 
-        if (fuel != null && coldDays > 0) {
-            // El hielo es un recurso discreto: no se puede consumir una fraccion. Se
-            // redondea HACIA ARRIBA (ceil) la cantidad de dias frios cubiertos — asi un
-            // tramo parcial (ej. 2.3 dias) igual "gasta" el hielo que lo cubrio entero,
-            // en vez de dejarlo a medio consumir. Es un poco conservador (podria gastar
-            // hasta ~1 hielo antes de lo estrictamente optimo si se reabre muy seguido)
-            // pero evita el problema inverso, mas grave: dejar el ultimo tramo parcial
-            // sin protección aunque hubiera hielo disponible para cubrirlo.
-            int consumed = (int) Math.min(fuel.getAmount(), Math.ceil(coldDays));
+        // El hielo es un recurso discreto: no se puede consumir una fraccion. En vez de
+        // redondear hacia arriba en CADA apertura (bug real: reabrir el electrodomestico
+        // varias veces seguidas en pocos segundos reales gastaba un hielo entero cada vez,
+        // aunque cada tramo individual fuera minusculo), el progreso fraccionario se
+        // ACUMULA entre aperturas y solo se consume hielo entero cuando ese acumulado
+        // realmente cruza un dia completo — igual que llenar un balde gota a gota.
+        double totalProgress = iceFractionProgress + coldDays;
+        int wholeIceConsumed = (int) Math.floor(totalProgress);
+        double remainingFraction = totalProgress - wholeIceConsumed;
+
+        if (fuel != null && wholeIceConsumed > 0) {
+            int consumed = Math.min(fuel.getAmount(), wholeIceConsumed);
             int remaining = fuel.getAmount() - consumed;
             if (remaining <= 0) {
                 contents[ApplianceGUI.FUEL_SLOT] = null;
@@ -105,6 +120,8 @@ public final class CatchUpProcessor {
                 fuel.setAmount(remaining);
             }
         }
+
+        return remainingFraction;
     }
 
     /**

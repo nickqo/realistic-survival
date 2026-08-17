@@ -57,10 +57,13 @@ public final class ApplianceGUI implements Listener {
 
         double currentDay = timeProvider.getCurrentDay(applianceLocation.getWorld());
         double lastCalcDay = readLastCalcDay(applianceLocation, currentDay);
+        double iceFractionProgress = readIceFractionProgress(applianceLocation);
         ItemStack[] contents = deserializeContents(applianceLocation);
 
-        catchUpProcessor.process(contents, lastCalcDay, currentDay, type == ApplianceType.FREEZER);
+        double remainingIceFraction = catchUpProcessor.process(
+                contents, lastCalcDay, currentDay, iceFractionProgress, type == ApplianceType.FREEZER);
         serializeContents(applianceLocation, contents, currentDay);
+        writeIceFractionProgress(applianceLocation, remainingIceFraction);
 
         ApplianceHolder holder = new ApplianceHolder(applianceLocation);
         // InventoryType.DISPENSER da la misma grilla 3x3 (9 slots) que un Dropper/
@@ -111,6 +114,7 @@ public final class ApplianceGUI implements Listener {
         String prefix = ApplianceManager.applianceKeyPrefix(applianceLocation);
         chunkPdc.remove(new NamespacedKey(plugin, prefix + "_contents"));
         chunkPdc.remove(new NamespacedKey(plugin, prefix + "_last_day"));
+        chunkPdc.remove(new NamespacedKey(plugin, prefix + "_ice_fraction"));
     }
 
     private ApplianceType readType(Location applianceLocation) {
@@ -131,6 +135,22 @@ public final class ApplianceGUI implements Listener {
         PersistentDataContainer chunkPdc = applianceLocation.getChunk().getPersistentDataContainer();
         String prefix = ApplianceManager.applianceKeyPrefix(applianceLocation);
         return chunkPdc.getOrDefault(new NamespacedKey(plugin, prefix + "_last_day"), PersistentDataType.DOUBLE, fallback);
+    }
+
+    /**
+     * Dias frios acumulados que todavia no alcanzaron a consumir un hielo entero (ver
+     * {@link CatchUpProcessor#process} para el porque de este acumulador).
+     */
+    private double readIceFractionProgress(Location applianceLocation) {
+        PersistentDataContainer chunkPdc = applianceLocation.getChunk().getPersistentDataContainer();
+        String prefix = ApplianceManager.applianceKeyPrefix(applianceLocation);
+        return chunkPdc.getOrDefault(new NamespacedKey(plugin, prefix + "_ice_fraction"), PersistentDataType.DOUBLE, 0.0);
+    }
+
+    private void writeIceFractionProgress(Location applianceLocation, double fraction) {
+        PersistentDataContainer chunkPdc = applianceLocation.getChunk().getPersistentDataContainer();
+        String prefix = ApplianceManager.applianceKeyPrefix(applianceLocation);
+        chunkPdc.set(new NamespacedKey(plugin, prefix + "_ice_fraction"), PersistentDataType.DOUBLE, fraction);
     }
 
     /**
