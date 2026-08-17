@@ -224,7 +224,16 @@ public final class FoodManager {
         }
 
         // Inicializacion perezosa: primera vez que se toca este item, nace fresco (100%).
+        // Excepcion: Restos Podridos (ROTTEN_FLESH) vanilla, ej. el drop de un zombie, nunca
+        // pasa por transformToRotten (es un no-op si el Material ya es ROTTEN_FLESH) asi que
+        // sin este caso especial nacia "fresca" al 100% la primera vez que se tocaba. Nace
+        // directamente en el tier PODRIDO (0%), estado terminal (ver RSDebugCommand, que
+        // rechaza modificarla).
         if (!isTracked(item)) {
+            if (item.getType() == Material.ROTTEN_FLESH) {
+                applyFreshness(item, 0, currentDay);
+                return 0;
+            }
             applyFreshness(item, 100, currentDay);
             return 100;
         }
