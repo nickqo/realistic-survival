@@ -1,0 +1,22 @@
+name: RealisticSurvival
+version: '${project.version}'
+main: cl.nico.realisticsurvival.RealisticSurvival
+api-version: '1.21'
+author: nico
+description: >
+  Deterioro de alimentos, refrigeracion/congelacion custom y agricultura estacional realista,
+  integrado con RealisticSeasons.
+
+# Hard dependency: el servidor NO cargara este plugin si RealisticSeasons no esta presente.
+depend: [RealisticSeasons]
+
+commands:
+  rsgive:
+    description: Entrega electrodomesticos o herramientas de riego custom del plugin.
+    usage: /<command> <fridge|freezer|wateringcan|sprinkler> [jugador]
+    permission: realisticsurvival.give
+
+permissions:
+  realisticsurvival.give:
+    description: Permite usar /rsgive para obtener items custom del plugin.
+    default: op
