@@ -59,11 +59,28 @@ public final class InventoryListener implements Listener {
 
         if (!isMergeableFood(current, cursor)) {
             // No hay fusion que hacer, pero igual aprovechamos el click para recalcular
-            // cualquiera de los dos items (etiquetarlo si es nuevo, o ponerlo al dia si
-            // ya estaba trackeado pero viejo).
+            // cualquiera de los dos items (etiquetarlo si es nuevo, ponerlo al dia si ya
+            // estaba trackeado pero viejo, o transformarlo a Restos Podridos si llego a 0%).
             double currentDay = timeProvider.getCurrentDay(event.getWhoClicked().getWorld());
-            refreshFreshness(current, currentDay);
-            refreshFreshness(cursor, currentDay);
+            ItemStack refreshedCurrent = refreshFreshness(current, currentDay);
+            ItemStack refreshedCursor = refreshFreshness(cursor, currentDay);
+
+            boolean currentChanged = refreshedCurrent != current;
+            boolean cursorChanged = refreshedCursor != cursor;
+            if (currentChanged || cursorChanged) {
+                // Solo cancelamos si algo realmente cambio (ej. se pudrio del todo) — un
+                // click normal sin transformaciones sigue su curso vanilla intacto.
+                event.setCancelled(true);
+                if (currentChanged) {
+                    event.setCurrentItem(refreshedCurrent);
+                }
+                if (cursorChanged) {
+                    // Mismo motivo que en el merge: el cambio de cursor se aplica en el
+                    // tick siguiente via el scheduler, no dentro del handler.
+                    HumanEntity clicker = event.getWhoClicked();
+                    Bukkit.getScheduler().runTask(plugin, () -> clicker.setItemOnCursor(refreshedCursor));
+                }
+            }
             return;
         }
 
@@ -105,9 +122,7 @@ public final class InventoryListener implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         Inventory inventory = event.getPlayer().getInventory();
         double currentDay = timeProvider.getCurrentDay(event.getPlayer().getWorld());
-        for (int slot = 0; slot < inventory.getSize(); slot++) {
-            refreshFreshness(inventory.getItem(slot), currentDay);
-        }
+        refreshInventory(inventory, currentDay);
     }
 
     /**
@@ -127,21 +142,44 @@ public final class InventoryListener implements Listener {
         }
 
         double currentDay = timeProvider.getCurrentDay(event.getPlayer().getWorld());
+        refreshInventory(inventory, currentDay);
+    }
+
+    /**
+     * Recorre un inventario completo poniendo al dia (o transformando a Restos Podridos)
+     * cada slot que corresponda, escribiendo de vuelta solo los que cambiaron.
+     */
+    private void refreshInventory(Inventory inventory, double currentDay) {
         for (int slot = 0; slot < inventory.getSize(); slot++) {
-            refreshFreshness(inventory.getItem(slot), currentDay);
+            ItemStack original = inventory.getItem(slot);
+            ItemStack refreshed = refreshFreshness(original, currentDay);
+            if (refreshed != original) {
+                inventory.setItem(slot, refreshed);
+            }
         }
     }
 
     /**
      * Pone al dia la frescura de un item: lo etiqueta (100% fresco) si el sistema nunca lo
      * habia tocado, o lo recalcula normalmente (catch-up) si ya estaba trackeado — asi un
-     * alimento nunca queda "viejo" por mucho tiempo real sin recalcularse. Muta
-     * {@code item} in-place; no hace nada si no es un alimento gestionado por el plugin.
+     * alimento nunca queda "viejo" por mucho tiempo real sin recalcularse. Si el resultado
+     * es 0% (Podrido), lo transforma a Restos Podridos.
+     *
+     * @return la referencia a usar de ahora en adelante — puede ser una instancia NUEVA
+     *         si se transformo a Restos Podridos (ver {@link FoodManager#transformToRotten},
+     *         que no muta in-place). El llamador es responsable de escribirla de vuelta en
+     *         el slot/cursor/mano de donde vino {@code item} si esta referencia cambio. Si
+     *         {@code item} no es un alimento gestionado por el plugin, se devuelve tal cual.
      */
-    private void refreshFreshness(ItemStack item, double currentDay) {
-        if (item != null && (foodManager.isTrackable(item) || foodManager.isTracked(item))) {
-            foodManager.calculateFreshness(item, currentDay, FoodManager.AMBIENT_MULTIPLIER);
+    private ItemStack refreshFreshness(ItemStack item, double currentDay) {
+        if (item == null || (!foodManager.isTrackable(item) && !foodManager.isTracked(item))) {
+            return item;
         }
+        int freshness = foodManager.calculateFreshness(item, currentDay, FoodManager.AMBIENT_MULTIPLIER);
+        if (foodManager.getTier(freshness) == FoodManager.SpoilageTier.PODRIDO) {
+            return foodManager.transformToRotten(item);
+        }
+        return item;
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -185,8 +223,7 @@ public final class InventoryListener implements Listener {
         // IGUAL, isSimilar ya permite que vanilla lo apile solo, sin intervencion nuestra.
         // Igual ponemos al dia el item del suelo (ej. drop de un mob recien matado, o uno
         // que llevaba tiempo tirado), para que se vea su frescura apenas entre al inventario.
-        refreshFreshness(ground, currentDay);
-        event.getItem().setItemStack(ground);
+        event.getItem().setItemStack(refreshFreshness(ground, currentDay));
     }
 
     /**
