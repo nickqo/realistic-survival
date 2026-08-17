@@ -242,9 +242,22 @@ public final class FoodManager {
     /**
      * Redondea un valor de frescura a la decena entera mas cercana (obligatorio en todo
      * el sistema). Ej: 74 -> 70, 76 -> 80.
+     * <p>
+     * <b>Empate exacto (ej. 95.0) redondea hacia ABAJO</b>, a diferencia de
+     * {@link Math#round(double)} (que siempre redondea los .5 hacia arriba). Es deliberado:
+     * con stacks de 64 (potencia de 2) es facil caer en un empate exacto al fusionar dos
+     * stacks — ej. {@code (64*90 + 64*100) / 128 = 95.0%} exacto. Redondear ese empate hacia
+     * arriba "lavaria" frescura gratis (95% real pasaria a guardarse como 100% oficial para
+     * siempre, ya que el redondeo es destructivo: el valor crudo no sobrevive al proximo
+     * calculo). Redondear hacia abajo en el empate cierra ese exploit sin cambiar el
+     * redondeo normal (no empatado) en nada.
      */
     public int roundToNearestTen(double freshness) {
-        return (int) (Math.round(freshness / 10.0) * 10);
+        double scaled = freshness / 10.0;
+        double floor = Math.floor(scaled);
+        double remainder = scaled - floor;
+        int tens = remainder > 0.5 ? (int) floor + 1 : (int) floor;
+        return tens * 10;
     }
 
     /**
