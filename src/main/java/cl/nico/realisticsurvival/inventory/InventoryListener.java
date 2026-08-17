@@ -8,6 +8,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
@@ -21,6 +22,14 @@ import org.bukkit.inventory.ItemStack;
  * {@link FoodManager}, y reescribe manualmente el ItemStack resultante. No contiene la
  * formula matematica de descomposicion en si (vive en FoodManager) — solo orquesta el
  * evento y el promedio ponderado propio del stacking (SRP, seccion 3 del documento).
+ * <p>
+ * <b>Inicializacion perezosa fuera de merges:</b> ademas de los merges, esta clase
+ * aprovecha cualquier click/pickup/conexion para "etiquetar" (100% fresco) alimentos que
+ * todavia no fueron tocados por el sistema — asi se ven el Lore/barra apenas el jugador
+ * interactua con ellos, sin depender de que justo intente fusionar dos stacks. Un item
+ * dado por comando ({@code /give}) y jamas tocado (ni un click, ni recogido del suelo, ni
+ * una reconexion) puede seguir sin etiquetar hasta la primera interaccion real — es una
+ * limitacion conocida del enfoque perezoso (ver seccion 1 del documento de arquitectura).
  */
 public final class InventoryListener implements Listener {
 
@@ -38,6 +47,11 @@ public final class InventoryListener implements Listener {
         ItemStack current = event.getCurrentItem();
 
         if (!isMergeableFood(current, cursor)) {
+            // No hay fusion que hacer, pero igual aprovechamos el click para etiquetar
+            // cualquiera de los dos items si todavia no fue tocado por el sistema.
+            long currentDay = timeProvider.getCurrentDay(event.getWhoClicked().getWorld());
+            lazyTagIfNeeded(current, currentDay);
+            lazyTagIfNeeded(cursor, currentDay);
             return;
         }
 
@@ -57,6 +71,31 @@ public final class InventoryListener implements Listener {
 
         event.setCurrentItem(merged[0]);
         event.getWhoClicked().setItemOnCursor(merged[1]);
+    }
+
+    /**
+     * Al conectarse, etiqueta cualquier alimento del inventario que todavia no haya sido
+     * tocado por el sistema (ej. items dados por comando mientras el jugador estaba
+     * offline, o de una sesion anterior a instalar el plugin).
+     */
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        Inventory inventory = event.getPlayer().getInventory();
+        long currentDay = timeProvider.getCurrentDay(event.getPlayer().getWorld());
+        for (int slot = 0; slot < inventory.getSize(); slot++) {
+            lazyTagIfNeeded(inventory.getItem(slot), currentDay);
+        }
+    }
+
+    /**
+     * Si el item es un alimento gestionado por el sistema pero todavia no fue trackeado
+     * (ej. recien dado por {@code /give}), lo marca como 100% fresco "ahora" para que su
+     * Lore/barra sean visibles de inmediato. Muta {@code item} in-place.
+     */
+    private void lazyTagIfNeeded(ItemStack item, long currentDay) {
+        if (item != null && foodManager.isTrackable(item) && !foodManager.isTracked(item)) {
+            foodManager.calculateFreshness(item, currentDay, FoodManager.AMBIENT_MULTIPLIER);
+        }
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -98,6 +137,12 @@ public final class InventoryListener implements Listener {
         }
         // Sin slot con frescura distinta a fusionar: si existe un stack con frescura
         // IGUAL, isSimilar ya permite que vanilla lo apile solo, sin intervencion nuestra.
+        // Igual etiquetamos el item del suelo si todavia no fue tocado (ej. drop de un
+        // mob recien matado), para que se vea su frescura apenas entre al inventario.
+        if (!foodManager.isTracked(ground)) {
+            foodManager.calculateFreshness(ground, currentDay, FoodManager.AMBIENT_MULTIPLIER);
+            event.getItem().setItemStack(ground);
+        }
     }
 
     /**

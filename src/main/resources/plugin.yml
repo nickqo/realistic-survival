@@ -17,7 +17,7 @@ commands:
     permission: realisticsurvival.give
   rsdebug:
     description: Fuerza la frescura/congelado del item en mano, para testear sin esperar dias in-game reales.
-    usage: /<command> setfreshness <0-100> | setfrozen <true|false>
+    usage: /<command> setfreshness <0-100> | setfrozen <true|false> | currentday
     permission: realisticsurvival.debug
 
 permissions:

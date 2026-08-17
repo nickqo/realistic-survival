@@ -4,6 +4,8 @@ import cl.nico.realisticsurvival.api.time.TimeProvider;
 import cl.nico.realisticsurvival.food.FoodManager;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import org.bukkit.Bukkit;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -15,15 +17,19 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Comando administrativo {@code /rsdebug}: fuerza el estado de frescura/congelado del
- * item en la mano del jugador, sin depender de que pasen dias in-game reales (RS los
- * mide segun su propio calendario, que suele avanzar mucho mas lento que tiempo real —
- * ver ARCHITECTURE.md). Pensado exclusivamente para probar la parte VISUAL/de gameplay
- * (barra de daño, Lore, penalizaciones al comer) de forma inmediata. Responsabilidad
- * unica: parsear argumentos y delegar en {@link FoodManager} — no contiene logica de
- * descomposicion propia (SRP).
+ * Comando administrativo {@code /rsdebug}: herramientas para probar el sistema de
+ * frescura sin depender de que pasen dias in-game reales (RS los mide segun su propio
+ * calendario, que puede avanzar mucho mas lento que tiempo real — ver ARCHITECTURE.md).
+ * Responsabilidad unica: parsear argumentos y delegar en {@link FoodManager} /
+ * {@link TimeProvider} — no contiene logica de descomposicion propia (SRP).
  * <p>
- * Uso: {@code /rsdebug setfreshness <0-100>} / {@code /rsdebug setfrozen <true|false>}
+ * Uso:
+ * <ul>
+ *     <li>{@code /rsdebug setfreshness <0-100>} — fuerza la frescura del item en mano.</li>
+ *     <li>{@code /rsdebug setfrozen <true|false>} — fuerza el flag congelado del item en mano.</li>
+ *     <li>{@code /rsdebug currentday} — muestra el dia in-game absoluto actual (segun RS),
+ *         para verificar si el calendario esta avanzando durante una sesion de prueba.</li>
+ * </ul>
  */
 public final class RSDebugCommand implements CommandExecutor, TabCompleter {
 
@@ -37,13 +43,23 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (args.length < 1) {
+            sender.sendMessage(usage());
+            return true;
+        }
+
+        if (args[0].equalsIgnoreCase("currentday")) {
+            currentDay(sender);
+            return true;
+        }
+
         if (!(sender instanceof Player player)) {
-            sender.sendMessage(Component.text("Solo un jugador puede usar este comando (opera sobre el item en su mano).", NamedTextColor.RED));
+            sender.sendMessage(Component.text("Este subcomando solo lo puede usar un jugador (opera sobre el item en su mano).", NamedTextColor.RED));
             return true;
         }
 
         if (args.length < 2) {
-            sender.sendMessage(Component.text("Uso: /rsdebug setfreshness <0-100> | /rsdebug setfrozen <true|false>", NamedTextColor.YELLOW));
+            sender.sendMessage(usage());
             return true;
         }
 
@@ -59,6 +75,24 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
             default -> sender.sendMessage(Component.text("Subcomando desconocido: " + args[0], NamedTextColor.RED));
         }
         return true;
+    }
+
+    private Component usage() {
+        return Component.text(
+                "Uso: /rsdebug setfreshness <0-100> | /rsdebug setfrozen <true|false> | /rsdebug currentday",
+                NamedTextColor.YELLOW);
+    }
+
+    /**
+     * Muestra el dia in-game absoluto actual (mundo del jugador, o el primer mundo del
+     * servidor si se ejecuta desde consola). Util para confirmar si el calendario de RS
+     * esta avanzando durante una sesion de testing corta, o si hay que usar sus propios
+     * comandos para adelantarlo.
+     */
+    private void currentDay(CommandSender sender) {
+        World world = sender instanceof Player player ? player.getWorld() : Bukkit.getWorlds().get(0);
+        long day = timeProvider.getCurrentDay(world);
+        sender.sendMessage(Component.text("Dia in-game absoluto actual (" + world.getName() + "): " + day, NamedTextColor.AQUA));
     }
 
     private void setFreshness(CommandSender sender, Player player, ItemStack item, String rawValue) {
@@ -92,7 +126,7 @@ public final class RSDebugCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 1) {
-            return List.of("setfreshness", "setfrozen");
+            return List.of("setfreshness", "setfrozen", "currentday");
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("setfreshness")) {
             return List.of("0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100");
