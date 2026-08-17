@@ -56,12 +56,14 @@ public final class FoodManager {
 
     /**
      * Dias in-game continuos dentro de un Congelador antes de que un item termine de
-     * congelarse (flag {@code frozen} pasa a true) — simetrico a {@link #THAW_DAYS}.
-     * Mientras dura este periodo de "enfriamiento", el item decae como en un Refrigerador
-     * ({@link #FRIDGE_MULTIPLIER}) en vez de detenerse por completo de inmediato: congelar
-     * algo del todo no es instantaneo.
+     * congelarse (flag {@code frozen} pasa a true) — antes era simetrico a
+     * {@link #THAW_DAYS} (1 dia completo), pero se ajusto a 3 horas in-game (mucho mas
+     * rapido que descongelar, que sigue siendo 1 dia completo). Mientras dura este periodo
+     * de "enfriamiento", el item decae como en un Refrigerador ({@link #FRIDGE_MULTIPLIER})
+     * en vez de detenerse por completo de inmediato: congelar algo del todo no es
+     * instantaneo, pero tampoco debe sentirse tan lento como descongelarse.
      */
-    public static final int FREEZE_DAYS = 1;
+    public static final double FREEZE_DAYS = 3.0 / 24.0;
 
     /** Dias que tarda en pudrirse por completo (100% -> 0%) un alimento no listado explicitamente. */
     private static final int DEFAULT_DECAY_DAYS = 8;
