@@ -68,6 +68,14 @@ public final class FoodManager {
     /** Dias que tarda en pudrirse por completo (100% -> 0%) un alimento no listado explicitamente. */
     private static final int DEFAULT_DECAY_DAYS = 8;
 
+    /**
+     * Puntos de frescura que gana un alimento crudo al cocinarse (horno/ahumador/horno de
+     * lava/fogata) sobre su frescura actual, sin superar el 100%. Cocinar no "resetea" la
+     * comida a fresca de nuevo (ver {@code food.CookingListener}) — un alimento crudo casi
+     * podrido sigue casi podrido despues de cocinarse, solo un poco mejor.
+     */
+    public static final int COOKING_FRESHNESS_BONUS = 30;
+
     /** Resolucion de la barra de daño visual (10 segmentos = 1 por cada decena de frescura). */
     private static final int DAMAGE_BAR_RESOLUTION = 10;
 

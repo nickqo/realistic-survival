@@ -33,7 +33,18 @@ import org.bukkit.inventory.ItemStack;
  * hacia arriba en cada apertura (eso gastaria un hielo entero cada vez que se reabre el
  * electrodomestico, aunque sea a los pocos segundos), el progreso fraccionario se acumula
  * entre aperturas via {@code iceFractionProgress} y solo se consume un hielo entero cuando
- * el acumulado realmente cruza un dia completo.
+ * el acumulado realmente cruza un dia completo — asi, mientras el suministro nunca se corte,
+ * cada hielo se consume exactamente a la misma hora del dia en que se coloco el primero
+ * (el acumulador es una suma continua desde ese instante, no algo atado al reloj de
+ * RealisticSeasons).
+ * <p>
+ * <b>Reinicio del cronometro al quedarse sin hielo:</b> si el slot de combustible queda
+ * vacio (sea porque ya estaba vacio al arrancar este catch-up, o porque se termino de
+ * consumir recien ahora), el progreso fraccionario devuelto es siempre 0.0, nunca un
+ * remanente. Sin esto, un hielo colocado despues de un corte de suministro heredaria la
+ * fraccion "a medio consumir" del hielo anterior, y se gastaria antes de completar un dia
+ * completo desde que se coloco — el cronometro solo debe empezar a correr desde el momento
+ * en que hay hielo puesto de nuevo.
  */
 public final class CatchUpProcessor {
 
@@ -62,7 +73,8 @@ public final class CatchUpProcessor {
      *                   {@link FoodManager#FRIDGE_MULTIPLIER})
      * @return el nuevo {@code iceFractionProgress} (el sobrante que aun no llego a
      *         consumir un hielo entero) — el llamador debe persistirlo y pasarlo de vuelta
-     *         en la proxima llamada.
+     *         en la proxima llamada. Siempre 0.0 si el slot de combustible termina vacio
+     *         (ver Javadoc de la clase, "Reinicio del cronometro al quedarse sin hielo").
      */
     public double process(ItemStack[] contents, double lastCalcDay, double currentDay,
                            double iceFractionProgress, boolean isFreezer) {
@@ -119,6 +131,14 @@ public final class CatchUpProcessor {
             } else {
                 fuel.setAmount(remaining);
             }
+        }
+
+        // Sin combustible al terminar (no habia desde el arranque de este catch-up, o se
+        // termino de consumir recien ahora): el cronometro se reinicia del todo. El proximo
+        // hielo que se coloque debe empezar a contar desde CERO en el instante exacto en
+        // que se pone, no heredar una fraccion vieja de "cuanto faltaba" del hielo anterior.
+        if (contents[ApplianceGUI.FUEL_SLOT] == null) {
+            return 0.0;
         }
 
         return remainingFraction;

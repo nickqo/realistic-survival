@@ -10,6 +10,7 @@ import cl.nico.realisticsurvival.commands.RSGiveCommand;
 import cl.nico.realisticsurvival.farming.FarmingListener;
 import cl.nico.realisticsurvival.farming.WateringManager;
 import cl.nico.realisticsurvival.food.ConsumeListener;
+import cl.nico.realisticsurvival.food.CookingListener;
 import cl.nico.realisticsurvival.food.FoodManager;
 import cl.nico.realisticsurvival.inventory.InventoryListener;
 import cl.nico.realisticsurvival.recipes.RecipeManager;
@@ -77,6 +78,7 @@ public final class RealisticSurvival extends JavaPlugin {
         // --- listeners ---
         PluginManager pluginManager = getServer().getPluginManager();
         pluginManager.registerEvents(new ConsumeListener(foodManager, timeProvider), this);
+        pluginManager.registerEvents(new CookingListener(foodManager, timeProvider), this);
         pluginManager.registerEvents(inventoryListener, this);
         pluginManager.registerEvents(applianceManager, this);
         pluginManager.registerEvents(applianceGUI, this);
