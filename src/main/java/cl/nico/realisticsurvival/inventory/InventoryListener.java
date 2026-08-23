@@ -103,7 +103,7 @@ public final class InventoryListener implements Listener {
         event.setCancelled(true);
 
         double currentDay = timeProvider.getCurrentDay(event.getWhoClicked().getWorld());
-        ItemStack[] merged = mergeStacks(current, cursor, currentDay);
+        ItemStack[] merged = foodManager.mergeStacks(current, cursor, currentDay);
 
         event.setCurrentItem(merged[0]);
 
@@ -228,7 +228,7 @@ public final class InventoryListener implements Listener {
                 continue;
             }
 
-            ItemStack[] merged = mergeStacks(existing, ground, currentDay);
+            ItemStack[] merged = foodManager.mergeStacks(existing, ground, currentDay);
             inventory.setItem(slot, merged[0]);
 
             event.setCancelled(true);
@@ -247,53 +247,6 @@ public final class InventoryListener implements Listener {
         // Igual ponemos al dia el item del suelo (ej. drop de un mob recien matado, o uno
         // que llevaba tiempo tirado), para que se vea su frescura apenas entre al inventario.
         event.getItem().setItemStack(refreshFreshness(ground, currentDay));
-    }
-
-    /**
-     * Fusiona dos stacks de comida en uno solo, aplicando el promedio ponderado por
-     * cantidad (seccion 3):
-     * {@code Nueva_Frescura = ((Cant_A * Frescura_A) + (Cant_B * Frescura_B)) / (Cant_A + Cant_B)},
-     * redondeado a la decena mas cercana. Antes de promediar, ambos stacks se llevan al
-     * dia actual (catch-up) para no mezclar datos obsoletos.
-     *
-     * @return arreglo de 2 posiciones: [0] = stack resultante para el slot original
-     *         (hasta el maximo apilable), [1] = remanente que no entro (o {@code null} si
-     *         todo entro en el slot).
-     */
-    private ItemStack[] mergeStacks(ItemStack a, ItemStack b, double currentDay) {
-        int freshnessA = foodManager.calculateFreshness(a, currentDay, FoodManager.AMBIENT_MULTIPLIER);
-        int freshnessB = foodManager.calculateFreshness(b, currentDay, FoodManager.AMBIENT_MULTIPLIER);
-
-        int amountA = a.getAmount();
-        int amountB = b.getAmount();
-        int totalAmount = amountA + amountB;
-
-        double weighted = ((double) amountA * freshnessA + (double) amountB * freshnessB) / totalAmount;
-        int newFreshness = foodManager.roundToNearestTen(weighted);
-        // Valor crudo (antes de redondear) como entero de punto fijo x100, solo para el
-        // Lore de debug de FoodManager — ej. 74.9275% se guarda como 7493 (redondeado al
-        // centesimo), nunca como decimal real.
-        long rawTimes100 = Math.round(weighted * 100);
-
-        ItemStack merged = a.clone();
-        int maxStack = merged.getMaxStackSize();
-        int slotAmount = Math.min(totalAmount, maxStack);
-        merged.setAmount(slotAmount);
-        foodManager.applyFreshness(merged, newFreshness, currentDay, rawTimes100);
-        if (foodManager.getTier(newFreshness) == FoodManager.SpoilageTier.PODRIDO) {
-            // ItemStack#setType esta deprecado: transformToRotten devuelve una referencia
-            // nueva en vez de mutar "merged" in-place, hay que recapturarla.
-            merged = foodManager.transformToRotten(merged);
-        }
-
-        int leftoverAmount = totalAmount - slotAmount;
-        ItemStack leftover = null;
-        if (leftoverAmount > 0) {
-            leftover = merged.clone();
-            leftover.setAmount(leftoverAmount);
-        }
-
-        return new ItemStack[] { merged, leftover };
     }
 
     /**

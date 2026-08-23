@@ -441,6 +441,56 @@ public final class FoodManager {
     }
 
     /**
+     * Fusiona dos stacks de comida del MISMO Material en uno solo, aplicando el promedio
+     * ponderado por cantidad (seccion 3):
+     * {@code Nueva_Frescura = ((Cant_A * Frescura_A) + (Cant_B * Frescura_B)) / (Cant_A + Cant_B)},
+     * redondeado a la decena mas cercana. Antes de promediar, ambos stacks se llevan al dia
+     * actual (catch-up) para no mezclar datos obsoletos. Metodo publico porque lo comparten
+     * {@code inventory.InventoryListener} (merge por click/recogida) y
+     * {@code food.CookingListener} (juntar todos los sub-stacks de un alimento al mandarlos
+     * de una sola vez a un Horno via shift-click, ver {@code onGatherIntoFurnace}) — la
+     * matematica del promedio vive aca, no duplicada en cada listener.
+     *
+     * @return arreglo de 2 posiciones: [0] = stack resultante (hasta el maximo apilable),
+     *         [1] = remanente que no entro (o {@code null} si todo entro en el slot).
+     */
+    public ItemStack[] mergeStacks(ItemStack a, ItemStack b, double currentDay) {
+        int freshnessA = calculateFreshness(a, currentDay, AMBIENT_MULTIPLIER);
+        int freshnessB = calculateFreshness(b, currentDay, AMBIENT_MULTIPLIER);
+
+        int amountA = a.getAmount();
+        int amountB = b.getAmount();
+        int totalAmount = amountA + amountB;
+
+        double weighted = ((double) amountA * freshnessA + (double) amountB * freshnessB) / totalAmount;
+        int newFreshness = roundToNearestTen(weighted);
+        // Valor crudo (antes de redondear) como entero de punto fijo x100, solo para el
+        // Lore de debug — ej. 74.9275% se guarda como 7493 (redondeado al centesimo), nunca
+        // como decimal real.
+        long rawTimes100 = Math.round(weighted * 100);
+
+        ItemStack merged = a.clone();
+        int maxStack = merged.getMaxStackSize();
+        int slotAmount = Math.min(totalAmount, maxStack);
+        merged.setAmount(slotAmount);
+        applyFreshness(merged, newFreshness, currentDay, rawTimes100);
+        if (getTier(newFreshness) == SpoilageTier.PODRIDO) {
+            // ItemStack#setType esta deprecado: transformToRotten devuelve una referencia
+            // nueva en vez de mutar "merged" in-place, hay que recapturarla.
+            merged = transformToRotten(merged);
+        }
+
+        int leftoverAmount = totalAmount - slotAmount;
+        ItemStack leftover = null;
+        if (leftoverAmount > 0) {
+            leftover = merged.clone();
+            leftover.setAmount(leftoverAmount);
+        }
+
+        return new ItemStack[] { merged, leftover };
+    }
+
+    /**
      * Transforma un item podrido (0%) en "Restos Podridos" (compostable): {@code
      * Material.ROTTEN_FLESH}, sin barra de daño visual (seccion 2) y frescura fija en 0.
      * <p>

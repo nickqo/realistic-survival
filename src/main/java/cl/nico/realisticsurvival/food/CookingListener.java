@@ -9,8 +9,12 @@ import org.bukkit.block.Block;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.FurnaceSmeltEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.FurnaceInventory;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.function.Consumer;
@@ -35,6 +39,15 @@ import java.util.function.Consumer;
  * por el diseño) — limitacion conocida de la API. Dejarla cocinar sin control seria un
  * exploit real (lavar cualquier alimento casi podrido a 100% gratis), asi que mientras no
  * exista un hook confiable, directamente se bloquea colocar comida rastreada en la fogata.
+ * <p>
+ * <b>Shift-click junta todos los sub-stacks (ver {@link #onGatherIntoFurnace}):</b> distinta
+ * frescura = distinto Lore/PDC = vanilla no considera dos stacks "similares", asi que el
+ * shift-click normal solo mueve UN sub-stack por click, dejando el resto sin cocinar. Al
+ * detectar un shift-click de un ingrediente valido hacia un Horno/Ahumador/Horno de Lava, se
+ * cancela el movimiento vanilla y se juntan TODOS los sub-stacks de ese mismo alimento del
+ * inventario de origen en uno solo (mismo promedio ponderado que cualquier otro merge, ver
+ * {@link FoodManager#mergeStacks}) directo en el slot de ingrediente — un solo click cocina
+ * todo lo que tengas de ese tipo, sin importar cuantas frescuras distintas haya.
  * <p>
  * No contiene logica de decaimiento propia: solo lee/escribe frescura via los metodos
  * publicos de {@link FoodManager} (SRP, mismo patron que {@code inventory.InventoryListener}
@@ -82,6 +95,72 @@ public final class CookingListener implements Listener {
         event.getPlayer().sendActionBar(Component.text(
                 "La Fogata no puede cocinar este alimento por ahora — usa un Horno/Ahumador/Horno de Lava.",
                 NamedTextColor.RED));
+    }
+
+    /**
+     * Ver Javadoc de la clase, "Shift-click junta todos los sub-stacks". Solo interviene si
+     * el click es shift-click, el inventario superior es un Horno/Ahumador/Horno de Lava, el
+     * click ocurrio en el inventario DE ORIGEN (no dentro del propio horno — sacar items no
+     * nos interesa), y el item es un ingrediente valido segun la receta de ESE horno
+     * ({@link FurnaceInventory#canSmelt}, evita interferir si el jugador shift-clickea algo
+     * que no tiene receta, ej. Restos Podridos).
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onGatherIntoFurnace(InventoryClickEvent event) {
+        ClickType click = event.getClick();
+        if (click != ClickType.SHIFT_LEFT && click != ClickType.SHIFT_RIGHT) {
+            return;
+        }
+        if (!(event.getView().getTopInventory() instanceof FurnaceInventory furnace)) {
+            return;
+        }
+        Inventory sourceInventory = event.getClickedInventory();
+        if (sourceInventory == null || sourceInventory.equals(furnace)) {
+            return;
+        }
+
+        ItemStack clicked = event.getCurrentItem();
+        if (clicked == null || (!foodManager.isTrackable(clicked) && !foodManager.isTracked(clicked))) {
+            return;
+        }
+        if (!furnace.canSmelt(clicked)) {
+            return;
+        }
+
+        event.setCancelled(true);
+
+        double currentDay = timeProvider.getCurrentDay(event.getWhoClicked().getWorld());
+        Material type = clicked.getType();
+        ItemStack existingIngredient = furnace.getSmelting();
+        ItemStack accumulated = (existingIngredient == null || existingIngredient.getType().isAir())
+                ? null : existingIngredient;
+
+        for (int slot = 0; slot < sourceInventory.getSize(); slot++) {
+            ItemStack stack = sourceInventory.getItem(slot);
+            if (stack == null || stack.getType() != type) {
+                continue;
+            }
+            if (!foodManager.isTrackable(stack) && !foodManager.isTracked(stack)) {
+                continue;
+            }
+
+            if (accumulated == null) {
+                accumulated = stack.clone();
+                sourceInventory.setItem(slot, null);
+                continue;
+            }
+            if (accumulated.getAmount() >= accumulated.getMaxStackSize()) {
+                // El slot de ingrediente ya llego al maximo apilable: el resto se queda en
+                // el inventario, igual que un shift-click normal que no alcanza a mover todo.
+                break;
+            }
+
+            ItemStack[] merged = foodManager.mergeStacks(accumulated, stack, currentDay);
+            accumulated = merged[0];
+            sourceInventory.setItem(slot, merged[1]);
+        }
+
+        furnace.setSmelting(accumulated);
     }
 
     /**
