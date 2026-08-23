@@ -251,6 +251,12 @@ public final class FoodManager {
 
         boolean enteringFreezer = Double.isInfinite(storageMultiplier);
 
+        // Adelantado aca (no dependen de la rama que sigue) porque el caso "normal" de abajo
+        // lo necesita para decidir si de verdad hay que limpiar el progreso de enfriamiento
+        // (ver el comentario en esa rama — bug real que impedia congelar nada).
+        double lastCalcDay = readLastCalcDay(item, currentDay);
+        double elapsedDays = Math.max(0.0, currentDay - lastCalcDay);
+
         if (enteringFreezer) {
             if (isFrozen(item)) {
                 // Ya estaba congelado del todo: se mantiene, no pudre, solo se actualiza
@@ -289,10 +295,24 @@ public final class FoodManager {
             setFrozen(item, false);
             clearThawProgress(item);
             writeLastCalcDay(item, thawStart + THAW_DAYS);
-        } else {
-            // Caso normal (ambiente o Refrigerador, nunca estuvo congelado): se limpia
-            // cualquier progreso de enfriamiento viejo por las dudas (ej. si salio de un
-            // Congelador a mitad de camino y volvio a entrar mas tarde, arranca de cero).
+        } else if (elapsedDays > 0) {
+            // Caso normal (ambiente o Refrigerador, nunca estuvo congelado) Y con tiempo
+            // real transcurrido: se limpia cualquier progreso de enfriamiento viejo por las
+            // dudas (ej. si salio del Congelador a mitad de camino y volvio a entrar mas
+            // tarde, arranca de cero).
+            //
+            // OJO con el "elapsedDays > 0": sin este guard, el congelador NUNCA lograba
+            // terminar de congelar nada (bug real reportado). CatchUpProcessor siempre hace
+            // un primer llamado de "sincronizacion" a velocidad AMBIENTE (multiplicador
+            // finito) ANTES del tramo frio real, incluso cuando el item lleva rato quieto
+            // dentro del mismo Congelador y no tiene ningun backlog que sincronizar
+            // (elapsedDays = 0 en ese caso, el llamado es un no-op numerico). Sin este guard,
+            // ESE llamado de sincronizacion tambien caia en esta rama "normal" y borraba
+            // {@code keyFreezeStartDay} en cada catch-up, antes de que el tramo frio (que
+            // viene justo despues, en el mismo catch-up) llegara a leerlo — el cronometro de
+            // enfriamiento se reiniciaba a si mismo en cada apertura y jamas acumulaba los
+            // {@link #FREEZE_DAYS} necesarios. Si de verdad paso tiempo (elapsedDays > 0), en
+            // cambio, es una salida real del frio (o backlog genuino) y el reinicio es correcto.
             clearFreezeProgress(item);
         }
 
@@ -306,8 +326,6 @@ public final class FoodManager {
         // "regalando" frescura de forma acumulativa. Por eso la base real es siempre el
         // crudo persistido (keyDebugRawX100), y el redondeado es puramente derivado/visual.
         double stored = readRawFreshness(item);
-        double lastCalcDay = readLastCalcDay(item, currentDay);
-        double elapsedDays = Math.max(0.0, currentDay - lastCalcDay);
 
         double ratePerDay = 100.0 / totalDecayDays(item.getType());
         double raw = stored - (elapsedDays * ratePerDay / storageMultiplier);
