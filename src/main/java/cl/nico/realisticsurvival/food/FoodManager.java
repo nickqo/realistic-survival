@@ -584,8 +584,20 @@ public final class FoodManager {
         if (existing != null) {
             return existing;
         }
-        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyFreezeStartDay, PersistentDataType.DOUBLE, currentDay));
-        return currentDay;
+        // OJO: se inicializa al watermark PROPIO del item (readLastCalcDay), NO a
+        // "currentDay" (el parametro de ESTE llamado, que para el tramo frio de
+        // CatchUpProcessor es el FINAL del intervalo que se esta procesando, no el inicio).
+        // Gracias al paso previo de "sincronizacion" del propio CatchUpProcessor, en este
+        // punto el watermark del item YA quedo puesto exactamente al INICIO real de este
+        // tramo frio. Si se inicializara a currentDay en cambio, la primera vez que se
+        // detecta frio se "regalaria" gratis todo el tiempo que ya habia transcurrido en
+        // ese mismo tramo (daysFreezing = currentDay - freezeStart = 0 SIEMPRE en esa
+        // primera deteccion, sin importar cuantas horas ya habian pasado) — bug real: el
+        // Congelador jamas lograba terminar de congelar nada con una sola reapertura, sin
+        // importar cuanto esperara el jugador antes de abrir.
+        double freezeStart = readLastCalcDay(item, currentDay);
+        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyFreezeStartDay, PersistentDataType.DOUBLE, freezeStart));
+        return freezeStart;
     }
 
     private double readOrInitThawStartDay(ItemStack item, double currentDay) {
