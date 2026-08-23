@@ -1,7 +1,5 @@
 package cl.nico.realisticsurvival.appliances;
 
-import io.papermc.paper.datacomponent.DataComponentTypes;
-import io.papermc.paper.datacomponent.item.CustomModelData;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -9,12 +7,9 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Tag;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
-import org.bukkit.entity.Display;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.ItemDisplay;
+import org.bukkit.block.data.Directional;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -26,94 +21,72 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
-import org.bukkit.util.Transformation;
-import org.joml.AxisAngle4f;
-import org.joml.Vector3f;
-
-import java.util.EnumMap;
-import java.util.Map;
-import java.util.UUID;
 
 /**
- * Maneja el ciclo de vida fisico/visual de los electrodomesticos (Refrigerador,
- * Congelador): colocacion/remocion del bloque {@code BARRIER} que provee la hitbox
- * solida, y spawn/despawn de la entidad {@link ItemDisplay} que renderiza el modelo 3D
- * (via CustomModelData de un Resource Pack) sobre esa barrera. Responsabilidad unica:
- * fisica + render + deteccion de la interaccion del jugador. NO contiene logica de
- * inventario (ver {@link ApplianceGUI}) ni de calculo de hielo/pudricion offline (ver
- * {@link CatchUpProcessor}) — cero ticking activo, todo reactivo a eventos.
+ * Maneja el ciclo de vida fisico de los electrodomesticos (Refrigerador, Congelador):
+ * colocacion/remocion del bloque real ({@code Dropper} para el Refrigerador,
+ * {@code Dispenser} para el Congelador — ya distinguibles entre si con su textura vanilla,
+ * sin necesitar Resource Pack) y deteccion de la interaccion del jugador. Responsabilidad
+ * unica: fisica + deteccion de interaccion. NO contiene logica de inventario (ver
+ * {@link ApplianceGUI}) ni de calculo de hielo/pudricion offline (ver {@link CatchUpProcessor})
+ * — cero ticking activo, todo reactivo a eventos.
  * <p>
- * <b>Nota importante:</b> {@code Material.BARRIER} es irrompible en supervivencia (dureza
- * -1), por lo que {@link BlockBreakEvent} nunca llega a dispararse ahi. Por eso "romper" el
- * electrodomestico en supervivencia se resuelve con un click izquierdo
- * ({@link Action#LEFT_CLICK_BLOCK}) + picota sobre la barrera en {@link #onInteract}. Pero
- * en modo CREATIVO, Minecraft SI permite romper bloques normalmente irrompibles como
- * Barrier con un solo click (sin picota) — eso SI dispara {@link BlockBreakEvent} (ver
- * {@link #onBlockBreak}), un camino totalmente distinto al de supervivencia. Si no se
- * escuchara ese evento, el bloque se rompe pero el {@link ItemDisplay}/PDC quedan huerfanos
- * (bug real: "bloque fantasma" flotando sin hitbox). Se deja romper libre en creativo (igual
- * que cualquier bloque vanilla ahi, sin picota) pero corriendo la misma limpieza.
+ * <b>Por que un bloque real y no un Barrier + entidad superpuesta:</b> la version anterior
+ * usaba {@code Material.BARRIER} (para la hitbox) con un {@code ItemDisplay} renderizado
+ * encima (para el modelo visual), lo que obligaba a: simular manualmente la rotura en
+ * supervivencia (Barrier es irrompible, {@link BlockBreakEvent} nunca llegaba a dispararse
+ * ahi) por un lado, y a escuchar por separado la rotura instantanea real de creativo por
+ * otro; mantener sincronizados dos objetos independientes (bloque + entidad) via UUID en el
+ * PDC del chunk; y depender de un Resource Pack para verse bien (con un fallback al Material
+ * base sin el). Usar directamente {@code Dropper}/{@code Dispenser} elimina las tres cosas:
+ * son bloques con dureza normal (rotura vanilla real, un solo {@link #onBlockBreak} cubre
+ * survival y creativo por igual), tienen su propio {@code Directional} nativo para la
+ * orientacion (nada de matrices de transformacion a mano), y su apariencia SIEMPRE es
+ * correcta (es la textura vanilla real del bloque, no una aproximacion).
  * <p>
- * <b>Compatibilidad sin Resource Pack:</b> el {@link ItemDisplay} usa como base el
- * {@link ApplianceType#getFallbackMaterial()} de cada tipo (Dropper para el Refrigerador,
- * Dispensador para el Congelador — visualmente distinguibles entre si incluso sin Resource
- * Pack) en vez de un lienzo neutro tipo {@code PAPER}. Sin el Resource Pack, el jugador ve
- * ese bloque vanilla (razonable, no roto); con el Resource Pack cargado, el
- * {@code CustomModelData} lo reemplaza por el modelo 3D real. El mecanismo (hitbox, GUI,
- * catch-up) funciona identico en ambos casos.
+ * <b>Distincion de un Dropper/Dispenser vanilla comun:</b> el bloque en si no lleva ninguna
+ * marca visual — lo que lo distingue de un Dropper/Dispenser cualquiera que un jugador haya
+ * colocado por su cuenta es unicamente la entrada en el PDC del {@link org.bukkit.Chunk}
+ * (ver {@link #isTrackedAppliance}). Sin esa entrada, el bloque se comporta 100% vanilla
+ * (abre su propia GUI de Dropper/Dispenser real, no la nuestra).
  * <p>
- * <b>Orientacion:</b> al colocarse, el {@link ItemDisplay} queda mirando hacia el jugador
- * que lo coloco, restringido a los 4 puntos cardinales (N/S/E/O — nunca diagonal ni
- * arriba/abajo), igual que un horno o dispensador vanilla. Ver {@link #resolvePlayerFacingAppliance}.
+ * <b>Limitacion conocida:</b> la colocacion escribe el bloque directamente
+ * ({@code Block#setType}) sin pasar por el pipeline normal de {@code BlockPlaceEvent} (igual
+ * que la version anterior con Barrier) — un plugin de proteccion de terreno (WorldGuard y
+ * similares) no vera este placement como un evento cancelable estandar.
+ * <p>
+ * <b>Orientacion:</b> al colocarse, el bloque queda mirando hacia el jugador que lo coloco,
+ * restringido a los 4 puntos cardinales (N/S/E/O — nunca arriba/abajo, a diferencia de un
+ * Dropper/Dispenser vanilla real que si puede apuntar verticalmente): un electrodomestico
+ * que "mirara" hacia arriba/abajo no tendria una cara practica para hacerle click. Ver
+ * {@link #resolvePlayerFacingAppliance}.
  */
 public final class ApplianceManager implements Listener {
 
     /** Tipos de electrodomestico soportados (seccion 4). */
     public enum ApplianceType {
-        /** Dropper: distinguible del Congelador (Dispensador) incluso sin Resource Pack. */
-        FRIDGE(1_100_001, Material.DROPPER, "Refrigerador"),
-        /** Dispensador: distinguible del Refrigerador (Dropper) incluso sin Resource Pack. */
-        FREEZER(1_100_002, Material.DISPENSER, "Congelador");
+        /** Dropper: distinguible del Congelador (Dispensador) por su textura vanilla real. */
+        FRIDGE(Material.DROPPER, "Refrigerador"),
+        /** Dispensador: distinguible del Refrigerador (Dropper) por su textura vanilla real. */
+        FREEZER(Material.DISPENSER, "Congelador");
 
-        private final int customModelData;
-        private final Material fallbackMaterial;
+        private final Material material;
         private final String displayName;
 
-        ApplianceType(int customModelData, Material fallbackMaterial, String displayName) {
-            this.customModelData = customModelData;
-            this.fallbackMaterial = fallbackMaterial;
+        ApplianceType(Material material, String displayName) {
+            this.material = material;
             this.displayName = displayName;
         }
 
-        public int getCustomModelData() {
-            return customModelData;
-        }
-
-        /** Material vanilla usado como base del modelo cuando no hay Resource Pack activo. */
-        public Material getFallbackMaterial() {
-            return fallbackMaterial;
+        /** Material real (bloque colocado Y item fisico) de este tipo de electrodomestico. */
+        public Material getMaterial() {
+            return material;
         }
 
         public String getDisplayName() {
             return displayName;
         }
     }
-
-    /**
-     * Rotacion (grados, eje Y) aplicada al {@link ItemDisplay} para cada punto cardinal.
-     * Asume que el modelo del Material base (ver {@link ApplianceType#getFallbackMaterial()})
-     * "mira" hacia el SUR por defecto en su orientacion sin rotar — es la convencion mas
-     * comun en los modelos de bloque vanilla, pero es un valor best-effort: no hay forma de
-     * verificarlo sin un cliente de Minecraft corriendo. Si en el juego el frente queda
-     * girado, basta con correr todos los valores de este mapa en +90/-90/180 (ej. NORTH:0,
-     * EAST:90, SOUTH:180, WEST:270).
-     */
-    private static final Map<BlockFace, Float> CARDINAL_Y_DEGREES = new EnumMap<>(Map.of(
-            BlockFace.SOUTH, 0f,
-            BlockFace.WEST, 90f,
-            BlockFace.NORTH, 180f,
-            BlockFace.EAST, 270f
-    ));
 
     private final Plugin plugin;
     private final ApplianceGUI applianceGUI;
@@ -136,24 +109,17 @@ public final class ApplianceManager implements Listener {
     }
 
     /**
-     * Crea el ItemStack "fisico" de un electrodomestico (para dar/dropear): el Material
-     * base es {@link ApplianceType#getFallbackMaterial()} (se ve razonable aunque el
-     * servidor/cliente no tenga el Resource Pack cargado) con el CustomModelData del tipo
-     * encima, mas un marcador en el PDC para reconocerlo al colocarlo. Los valores de
-     * CustomModelData son placeholder: deben ajustarse al Resource Pack real.
+     * Crea el ItemStack "fisico" de un electrodomestico (para dar/dropear): un
+     * {@link ApplianceType#getMaterial()} real con nombre propio y un marcador en el PDC
+     * para reconocerlo al colocarlo (ver {@link #placeAppliance}).
      */
     public ItemStack createApplianceItem(ApplianceType type) {
-        ItemStack item = buildModelItem(type);
-        item.editMeta(meta -> meta.getPersistentDataContainer().set(keyItemType, PersistentDataType.STRING, type.name()));
-        return item;
-    }
-
-    private ItemStack buildModelItem(ApplianceType type) {
-        ItemStack item = new ItemStack(type.getFallbackMaterial());
-        item.setData(DataComponentTypes.CUSTOM_MODEL_DATA,
-                CustomModelData.customModelData().addFloat(type.getCustomModelData()).build());
-        item.editMeta(meta -> meta.displayName(Component.text(type.getDisplayName(), NamedTextColor.WHITE)
-                .decoration(TextDecoration.ITALIC, false)));
+        ItemStack item = new ItemStack(type.getMaterial());
+        item.editMeta(meta -> {
+            meta.displayName(Component.text(type.getDisplayName(), NamedTextColor.WHITE)
+                    .decoration(TextDecoration.ITALIC, false));
+            meta.getPersistentDataContainer().set(keyItemType, PersistentDataType.STRING, type.name());
+        });
         return item;
     }
 
@@ -164,40 +130,27 @@ public final class ApplianceManager implements Listener {
             // quedamos solo con una para no procesar todo dos veces.
             return;
         }
+        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) {
+            return;
+        }
 
         Block clicked = event.getClickedBlock();
         if (clicked == null) {
             return;
         }
 
-        if (event.getAction() == Action.RIGHT_CLICK_BLOCK
-                && clicked.getType() == Material.BARRIER
-                && isTrackedAppliance(clicked.getLocation())) {
+        if (isApplianceMaterial(clicked.getType()) && isTrackedAppliance(clicked.getLocation())) {
+            // Es un electrodomestico nuestro: se abre la GUI virtual en vez de la GUI real
+            // de Dropper/Dispenser vanilla.
             event.setCancelled(true);
             applianceGUI.open(event.getPlayer(), clicked.getLocation());
             return;
         }
 
-        if (event.getAction() == Action.LEFT_CLICK_BLOCK
-                && clicked.getType() == Material.BARRIER
-                && isTrackedAppliance(clicked.getLocation())) {
-            if (!isHoldingPickaxe(event.getItem())) {
-                // Igual que un Dropper/Dispensador real: hace falta una picota. Sin una,
-                // no pasa nada (no simulamos el tiempo de picado real para no necesitar
-                // ticking activo: o se rompe con picota en un click, o no se rompe).
-                return;
-            }
+        ApplianceType type = readItemApplianceType(event.getItem());
+        if (type != null) {
             event.setCancelled(true);
-            breakAppliance(event.getPlayer(), clicked);
-            return;
-        }
-
-        if (event.getAction() == Action.RIGHT_CLICK_BLOCK) {
-            ApplianceType type = readItemApplianceType(event.getItem());
-            if (type != null) {
-                event.setCancelled(true);
-                placeAppliance(event.getPlayer(), event.getItem(), clicked, event.getBlockFace(), type);
-            }
+            placeAppliance(event.getPlayer(), event.getItem(), clicked, event.getBlockFace(), type);
         }
     }
 
@@ -210,82 +163,89 @@ public final class ApplianceManager implements Listener {
             return;
         }
 
-        target.setType(Material.BARRIER);
-        Location center = target.getLocation().add(0.5, 0.5, 0.5);
-        ItemDisplay display = spawnDisplay(center, type, resolvePlayerFacingAppliance(player));
+        target.setType(type.getMaterial());
+        if (target.getBlockData() instanceof Directional directional) {
+            directional.setFacing(resolvePlayerFacingAppliance(player));
+            target.setBlockData(directional);
+        }
 
         PersistentDataContainer chunkPdc = target.getChunk().getPersistentDataContainer();
         String prefix = applianceKeyPrefix(target.getLocation());
         chunkPdc.set(new NamespacedKey(plugin, prefix + "_type"), PersistentDataType.STRING, type.name());
-        chunkPdc.set(new NamespacedKey(plugin, prefix + "_display_uuid"), PersistentDataType.STRING,
-                display.getUniqueId().toString());
 
         if (player.getGameMode() != GameMode.CREATIVE) {
             handItem.setAmount(handItem.getAmount() - 1);
         }
     }
 
-    /** Rotura manual en supervivencia (click izquierdo + picota, ver {@link #onInteract}). */
-    private void breakAppliance(Player player, Block barrierBlock) {
-        ApplianceType type = cleanupAppliance(barrierBlock);
-        if (type != null && player.getGameMode() != GameMode.CREATIVE) {
-            barrierBlock.getWorld().dropItemNaturally(
-                    barrierBlock.getLocation().clone().add(0.5, 0.5, 0.5), createApplianceItem(type));
-        }
-    }
-
     /**
-     * Rotura instantanea en modo creativo (ver Javadoc de la clase): Minecraft ya rompe el
-     * Barrier solo, asi que aca solo hace falta la limpieza — sin dropear el item fisico,
-     * igual que cualquier bloque roto en creativo vanilla.
+     * Rotura del electrodomestico. A diferencia de la version anterior (Barrier, irrompible
+     * en supervivencia), Dropper/Dispenser tienen dureza normal — un solo handler cubre
+     * survival (rotura vanilla con la herramienta correcta) y creativo (instantanea) por
+     * igual, sin necesitar caminos separados.
      */
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
         Block block = event.getBlock();
-        if (block.getType() != Material.BARRIER || !isTrackedAppliance(block.getLocation())) {
+        if (!isApplianceMaterial(block.getType()) || !isTrackedAppliance(block.getLocation())) {
             return;
         }
+
+        Player player = event.getPlayer();
+        // Se calcula ANTES de cleanupAppliance porque ese metodo deja el bloque en AIR, y
+        // Block#isPreferredTool necesita el bloque/BlockData original para decidir — mismo
+        // criterio que usa vanilla para saber si un Dropper/Dispenser suelta item al
+        // romperse (picota) o no.
+        boolean shouldDrop = player.getGameMode() != GameMode.CREATIVE
+                && block.isPreferredTool(player.getInventory().getItemInMainHand());
+
+        ApplianceType type = cleanupAppliance(block);
+        // Controlamos el drop nosotros (item con nombre/PDC propio, no un Dropper/Dispenser
+        // en blanco): se cancela el drop vanilla incondicionalmente y se decide aparte.
         event.setDropItems(false);
-        cleanupAppliance(block);
+        if (shouldDrop && type != null) {
+            block.getWorld().dropItemNaturally(
+                    block.getLocation().clone().add(0.5, 0.5, 0.5), createApplianceItem(type));
+        }
     }
 
     /**
-     * Limpieza compartida entre la rotura manual (supervivencia) y la instantanea
-     * (creativo): despawnea el {@link ItemDisplay}, vuelca el inventario virtual como
-     * drops, y borra el estado del PDC del chunk. NO decide si se devuelve el item fisico
-     * — eso lo resuelve cada llamador segun el modo de juego.
+     * Limpieza al romper: vuelca el inventario virtual como drops y borra el estado del PDC
+     * del chunk. NO decide si se devuelve el item fisico — eso lo resuelve
+     * {@link #onBlockBreak} segun el modo de juego y la herramienta usada.
      *
      * @return el {@link ApplianceType} que tenia el bloque, o {@code null} si por algun
      *         motivo ya no estaba trackeado.
      */
-    private ApplianceType cleanupAppliance(Block barrierBlock) {
-        Location location = barrierBlock.getLocation();
+    private ApplianceType cleanupAppliance(Block block) {
+        Location location = block.getLocation();
         ApplianceType type = readBlockApplianceType(location);
 
-        applianceGUI.dropContentsAndClear(location, barrierBlock.getWorld());
-        despawnDisplay(location);
+        applianceGUI.dropContentsAndClear(location, block.getWorld());
 
-        PersistentDataContainer chunkPdc = barrierBlock.getChunk().getPersistentDataContainer();
-        String prefix = applianceKeyPrefix(location);
-        chunkPdc.remove(new NamespacedKey(plugin, prefix + "_type"));
-        chunkPdc.remove(new NamespacedKey(plugin, prefix + "_display_uuid"));
+        PersistentDataContainer chunkPdc = block.getChunk().getPersistentDataContainer();
+        chunkPdc.remove(new NamespacedKey(plugin, applianceKeyPrefix(location) + "_type"));
 
-        barrierBlock.setType(Material.AIR);
+        block.setType(Material.AIR);
         return type;
     }
 
-    public boolean isTrackedAppliance(Location barrierLocation) {
-        return readBlockApplianceType(barrierLocation) != null;
+    public boolean isTrackedAppliance(Location location) {
+        return readBlockApplianceType(location) != null;
     }
 
-    private boolean isHoldingPickaxe(ItemStack item) {
-        return item != null && Tag.ITEMS_PICKAXES.isTagged(item.getType());
+    private boolean isApplianceMaterial(Material material) {
+        for (ApplianceType type : ApplianceType.values()) {
+            if (type.getMaterial() == material) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    private ApplianceType readBlockApplianceType(Location barrierLocation) {
-        PersistentDataContainer chunkPdc = barrierLocation.getChunk().getPersistentDataContainer();
-        String prefix = applianceKeyPrefix(barrierLocation);
-        String raw = chunkPdc.get(new NamespacedKey(plugin, prefix + "_type"), PersistentDataType.STRING);
+    private ApplianceType readBlockApplianceType(Location location) {
+        PersistentDataContainer chunkPdc = location.getChunk().getPersistentDataContainer();
+        String raw = chunkPdc.get(new NamespacedKey(plugin, applianceKeyPrefix(location) + "_type"), PersistentDataType.STRING);
         return parseType(raw);
     }
 
@@ -308,20 +268,11 @@ public final class ApplianceManager implements Listener {
         }
     }
 
-    private ItemDisplay spawnDisplay(Location center, ApplianceType type, BlockFace facing) {
-        return center.getWorld().spawn(center, ItemDisplay.class, entity -> {
-            entity.setItemStack(buildModelItem(type));
-            entity.setBillboard(Display.Billboard.FIXED);
-            entity.setPersistent(true);
-            entity.setTransformation(cardinalTransformation(facing));
-        });
-    }
-
     /**
-     * Punto cardinal (N/S/E/O, nunca diagonal ni arriba/abajo) hacia el que debe quedar
-     * mirando el electrodomestico para encarar al jugador que lo coloca — el mismo
-     * criterio que usa un horno/dispensador vanilla: el frente apunta hacia donde estaba
-     * parado el jugador, es decir, el opuesto de hacia donde el jugador estaba mirando.
+     * Punto cardinal (N/S/E/O, nunca arriba/abajo) hacia el que debe quedar mirando el
+     * electrodomestico para encarar al jugador que lo coloca — el mismo criterio que usa un
+     * horno vanilla: el frente apunta hacia donde estaba parado el jugador, es decir, el
+     * opuesto de hacia donde el jugador estaba mirando.
      */
     private BlockFace resolvePlayerFacingAppliance(Player player) {
         return playerCardinalLookDirection(player).getOppositeFace();
@@ -340,27 +291,5 @@ public final class ApplianceManager implements Listener {
             case 2 -> BlockFace.NORTH;
             default -> BlockFace.EAST;
         };
-    }
-
-    private Transformation cardinalTransformation(BlockFace facing) {
-        float degrees = CARDINAL_Y_DEGREES.getOrDefault(facing, 0f);
-        return new Transformation(
-                new Vector3f(0f, 0f, 0f),
-                new AxisAngle4f((float) Math.toRadians(degrees), 0f, 1f, 0f),
-                new Vector3f(1f, 1f, 1f),
-                new AxisAngle4f(0f, 0f, 1f, 0f));
-    }
-
-    private void despawnDisplay(Location barrierLocation) {
-        PersistentDataContainer chunkPdc = barrierLocation.getChunk().getPersistentDataContainer();
-        NamespacedKey key = new NamespacedKey(plugin, applianceKeyPrefix(barrierLocation) + "_display_uuid");
-        String raw = chunkPdc.get(key, PersistentDataType.STRING);
-        if (raw == null) {
-            return;
-        }
-        Entity entity = barrierLocation.getWorld().getEntity(UUID.fromString(raw));
-        if (entity != null) {
-            entity.remove();
-        }
     }
 }

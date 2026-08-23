@@ -34,10 +34,12 @@ En la 1.21, Minecraft rechaza agrupar (stackear) ítems si sus Componentes o PDC
 ## ❄️ 4. Electrodomésticos: Refrigerador y Congelador (Motor Custom)
 Se crean bloques interactivos sin depender de plugins de texturas de pago.
 
-### 4.1. Implementación Física y Visual (Cero Lag)
-- Base Física: Al colocar el ítem, se coloca un bloque de BARRIER (Barrera) invisible para proveer una hitbox sólida.
-- Renderizado 3D: En el centro exacto de la Barrera, se invoca una entidad `ItemDisplay` que muestra un modelo 3D usando el `CustomModelData` de un Resource Pack.
-- Inventario: Al hacer clic derecho en la Barrera, se abre un Inventario Virtual (GUI de 9 slots). El contenido se serializa y guarda en el PDC del Chunk (asociado a las coordenadas).
+### 4.1. Implementación Física (Bloque Real)
+- Base Física: al colocar el ítem se coloca un bloque real y vanilla — `Dropper` para el Refrigerador, `Dispenser` para el Congelador — ya distinguibles entre sí por su propia textura, sin depender de ningún Resource Pack.
+- Orientación: el bloque queda mirando hacia el jugador que lo coloca, restringido a los 4 puntos cardinales, usando el `Directional` nativo del propio bloque (sin matrices de transformación a mano).
+- Distinción de un Dropper/Dispenser vanilla cualquiera: únicamente una marca en el PDC del Chunk — el bloque en sí no lleva ninguna señal visual. Sin esa marca, el bloque se comporta 100% vanilla.
+- Inventario: al hacer clic derecho en un bloque marcado, se cancela la apertura de su GUI vanilla y se abre en su lugar un Inventario Virtual propio (GUI de 9 slots). El contenido se serializa y guarda en el PDC del Chunk (asociado a las coordenadas).
+- Rotura: al tener dureza normal (a diferencia de un Barrier, irrompible en supervivencia), un único listener de `BlockBreakEvent` cubre tanto la rotura en supervivencia (con la herramienta correcta) como la instantánea en creativo — Bukkit ya resuelve esa distinción por su cuenta con un bloque real.
 
 ### 4.2. Combustible y Catch-up Logic
 - Combustible: El Slot 8 está reservado para Hielo o Hielo Azul.
@@ -79,7 +81,7 @@ src/main/java/cl/nico/realisticsurvival/
 ├── inventory/
 │   └── InventoryListener.java    # Lógica de stacking (InventoryClickEvent), promedio y redondeo
 ├── appliances/
-│   ├── ApplianceManager.java     # Manejo de Barriers, ItemDisplays (spawn/despawn)
+│   ├── ApplianceManager.java     # Colocación/rotura del bloque real (Dropper/Dispenser)
 │   ├── ApplianceGUI.java         # Interfaces virtuales de 9 slots
 │   └── CatchUpProcessor.java     # Cálculo de hielo y pudrición offline
 └── farming/
@@ -129,15 +131,13 @@ Como respaldo/atajo para pruebas (u operadores que quieran saltarse el crafteo),
 
 ## 🎨 10. Compatibilidad visual sin Resource Pack
 
-Todo ítem/entidad `ItemDisplay` custom (Refrigerador, Congelador, Aspersor, Regadera) usa como base un **Material vanilla temáticamente razonable** en vez de un lienzo neutro (`PAPER`/`STICK`), para que el mecanismo se vea sensato incluso sin el Resource Pack cargado:
+El Refrigerador y el Congelador (`appliances/ApplianceManager`) ya no dependen de esto: son bloques `Dropper`/`Dispenser` reales, con su textura y orientación (`Directional`) vanilla nativas — no hay Resource Pack, `CustomModelData` ni entidad `ItemDisplay` de por medio para ellos en absoluto.
+
+El Aspersor y la Regadera Manual (`farming/WateringManager`) siguen el esquema anterior: usan como base un **Material vanilla temáticamente razonable** en vez de un lienzo neutro (`PAPER`/`STICK`), para que el mecanismo se vea sensato incluso sin el Resource Pack cargado:
 
 | Tipo | Material base (fallback) | CustomModelData (placeholder) | Orientación |
 |---|---|---|---|
-| Refrigerador | `DROPPER` | 1100001 | Mira al jugador que lo coloca, restringido a los 4 puntos cardinales |
-| Congelador | `DISPENSER` | 1100002 | Mira al jugador que lo coloca, restringido a los 4 puntos cardinales |
 | Regadera Manual | `GLASS_BOTTLE` | 1200001 | — (ítem de mano, no se coloca) |
-| Aspersor | `DISPENSER` | 1200002 | Siempre mira hacia arriba, sin importar cómo se coloque |
+| Aspersor | `DISPENSER` | 1200002 | Siempre mira hacia arriba, sin importar cómo se coloque (entidad `ItemDisplay` sobre un bloque `BARRIER`, ver `WateringManager#FACING_UP_TRANSFORMATION`) |
 
-Cuando el Resource Pack está presente, el `CustomModelData` de cada tipo debe mapear al modelo 3D real vía overrides de modelo de ítem (`item/<material>.json` en 1.21.4+); sin el Resource Pack, el cliente simplemente muestra el Material base tal cual — el mecanismo (hitbox, GUI, catch-up) es idéntico en ambos casos. Los valores de `CustomModelData` son placeholder y deben ajustarse cuando exista el Resource Pack real.
-
-Refrigerador y Congelador usan Dropper/Dispensador (en vez de un mismo bloque) para que sean **visualmente distinguibles entre sí** incluso sin Resource Pack. La orientación cardinal se logra rotando la entidad `ItemDisplay` (no el bloque `BARRIER`, que no tiene estado de orientación) mediante `Transformation`/`AxisAngle4f` sobre el eje Y — el ángulo exacto por punto cardinal (`ApplianceManager#CARDINAL_Y_DEGREES`) y la inclinación del Aspersor (`WateringManager#FACING_UP_TRANSFORMATION`) son **valores best-effort**: no hay forma de verificar la orientación visual real sin un cliente de Minecraft corriendo, así que quedan documentados en el código como el primer punto a ajustar (girar en incrementos de 90°) al probar en el servidor.
+Cuando el Resource Pack está presente, el `CustomModelData` del Aspersor/Regadera debe mapear al modelo 3D real vía overrides de modelo de ítem (`item/<material>.json` en 1.21.4+); sin el Resource Pack, el cliente simplemente muestra el Material base tal cual. El valor de `WateringManager#FACING_UP_TRANSFORMATION` es **best-effort**: no hay forma de verificar la orientación visual real sin un cliente de Minecraft corriendo.
