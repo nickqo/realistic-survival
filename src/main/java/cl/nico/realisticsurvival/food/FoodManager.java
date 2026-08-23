@@ -602,6 +602,18 @@ public final class FoodManager {
         return PdcCompat.readDay(item.getItemMeta().getPersistentDataContainer(), keyLastCalcDay, fallback);
     }
 
+    /**
+     * Version publica de {@link #readLastCalcDay} — expuesta especificamente para
+     * {@code food.CookingListener}, que necesita leer el watermark de un item YA cocinado
+     * para poder reusarlo exacto en el siguiente resultado del mismo horno (ver el Javadoc
+     * de esa clase, "Resultados identicos para que vanilla los apile solo") y asi evitar que
+     * dos resultados con la misma frescura redondeada terminen con un PDC ligeramente
+     * distinto (el watermark) que le impida a vanilla apilarlos en el slot de salida.
+     */
+    public double getLastCalcDay(ItemStack item, double fallback) {
+        return readLastCalcDay(item, fallback);
+    }
+
     private void writeLastCalcDay(ItemStack item, double day) {
         item.editMeta(meta -> meta.getPersistentDataContainer().set(keyLastCalcDay, PersistentDataType.DOUBLE, day));
     }

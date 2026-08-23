@@ -6,6 +6,7 @@ import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.Furnace;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
@@ -49,6 +50,20 @@ import java.util.function.Consumer;
  * {@link FoodManager#mergeStacks}) directo en el slot de ingrediente — un solo click cocina
  * todo lo que tengas de ese tipo, sin importar cuantas frescuras distintas haya.
  * <p>
+ * <b>Resultados identicos para que vanilla los apile solo (ver {@link #applyCookingBonus}):</b>
+ * ese mismo problema de "distinto PDC = no se apilan" existe tambien del lado de SALIDA, y
+ * ahi no hay forma de intervenir con un click porque el propio Horno combina cada resultado
+ * nuevo con lo que ya haya en su slot de salida de forma completamente interna (sin ningun
+ * evento que avisarnos). Si dos resultados cocinados con la MISMA frescura redondeada
+ * quedaran con {@code keyLastCalcDay} (el timestamp interno, escrito con el "ahora" de cada
+ * ciclo de cocinado) ligeramente distinto entre si, vanilla los veria como items diferentes
+ * y jamas lograria combinarlos — el horno quedaria trabado despues del primer item cocinado,
+ * esperando un slot de salida "compatible" que nunca llega (bug real reportado: "el segundo
+ * item no se cocina"). Por eso, si ya hay un resultado pendiente en el slot de salida con la
+ * misma frescura redondeada que el que se esta por producir, se reusa su timestamp EXACTO en
+ * vez del "ahora" en vivo — dejando el nuevo resultado PDC-identico al anterior, para que
+ * vanilla los apile solo sin que nosotros tengamos que tocar el slot de salida.
+ * <p>
  * No contiene logica de decaimiento propia: solo lee/escribe frescura via los metodos
  * publicos de {@link FoodManager} (SRP, mismo patron que {@code inventory.InventoryListener}
  * y {@link ConsumeListener}).
@@ -67,7 +82,9 @@ public final class CookingListener implements Listener {
     @EventHandler(ignoreCancelled = true)
     public void onFurnaceSmelt(FurnaceSmeltEvent event) {
         World world = event.getBlock().getWorld();
-        applyCookingBonus(event.getSource(), event.getResult(), event::setResult, world);
+        ItemStack existingResult = (event.getBlock().getState() instanceof Furnace furnace)
+                ? furnace.getInventory().getResult() : null;
+        applyCookingBonus(event.getSource(), event.getResult(), event::setResult, world, existingResult);
     }
 
     /**
@@ -168,8 +185,13 @@ public final class CookingListener implements Listener {
      * resultado cocinado con el bono de {@link FoodManager#COOKING_FRESHNESS_BONUS}. No hace
      * nada si el resultado no es un alimento rastreado por el plugin (ej. cocinar arena a
      * vidrio, o mineral a lingote) ni si la fuente no lo es.
+     *
+     * @param existingResult lo que ya haya en el slot de salida del horno ANTES de este
+     *                       ciclo (o {@code null} si esta vacio) — ver Javadoc de la clase,
+     *                       "Resultados identicos para que vanilla los apile solo".
      */
-    private void applyCookingBonus(ItemStack source, ItemStack result, Consumer<ItemStack> applyResult, World world) {
+    private void applyCookingBonus(ItemStack source, ItemStack result, Consumer<ItemStack> applyResult,
+                                    World world, ItemStack existingResult) {
         if (result == null || !foodManager.isTrackable(result)) {
             return;
         }
@@ -188,8 +210,18 @@ public final class CookingListener implements Listener {
 
         int newFreshness = Math.min(100, sourceFreshness + FoodManager.COOKING_FRESHNESS_BONUS);
 
+        // Si el slot de salida ya tiene un resultado del mismo tipo Y la misma frescura
+        // redondeada, reusamos su timestamp interno EXACTO en vez del "ahora" en vivo, para
+        // que el nuevo resultado quede PDC-identico y vanilla los apile solo (ver Javadoc).
+        double watermark = currentDay;
+        if (existingResult != null && !existingResult.getType().isAir()
+                && existingResult.getType() == result.getType()
+                && foodManager.getStoredFreshness(existingResult) == newFreshness) {
+            watermark = foodManager.getLastCalcDay(existingResult, currentDay);
+        }
+
         ItemStack cooked = result.clone();
-        foodManager.applyFreshness(cooked, newFreshness, currentDay);
+        foodManager.applyFreshness(cooked, newFreshness, watermark);
         applyResult.accept(cooked);
     }
 }
