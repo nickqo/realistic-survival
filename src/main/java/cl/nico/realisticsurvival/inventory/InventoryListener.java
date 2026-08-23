@@ -3,8 +3,6 @@ package cl.nico.realisticsurvival.inventory;
 import cl.nico.realisticsurvival.api.time.TimeProvider;
 import cl.nico.realisticsurvival.appliances.ApplianceGUI;
 import cl.nico.realisticsurvival.food.FoodManager;
-import org.bukkit.Bukkit;
-import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -85,10 +83,9 @@ public final class InventoryListener implements Listener {
                     event.setCurrentItem(refreshedCurrent);
                 }
                 if (cursorChanged) {
-                    // Mismo motivo que en el merge: el cambio de cursor se aplica en el
-                    // tick siguiente via el scheduler, no dentro del handler.
-                    HumanEntity clicker = event.getWhoClicked();
-                    Bukkit.getScheduler().runTask(plugin, () -> clicker.setItemOnCursor(refreshedCursor));
+                    // Ver Javadoc de la clase / comentario en el merge de abajo: setCursor
+                    // dentro del handler (sincronico) es lo correcto, no diferirlo.
+                    event.getView().setCursor(refreshedCursor);
                 }
             }
             return;
@@ -110,18 +107,22 @@ public final class InventoryListener implements Listener {
 
         event.setCurrentItem(merged[0]);
 
-        // IMPORTANTE: ni event.setCursor() (deprecado desde Bukkit 1.5.2, documentado como
-        // causante de estas mismas inconsistencias) ni getWhoClicked().setItemOnCursor()
-        // llamados DENTRO del handler son confiables aca: con el evento cancelado, Bukkit
-        // resincroniza el cursor del cliente usando el valor ORIGINAL trackeado por el
-        // propio evento despues de que este handler termina, pisando cualquier cambio de
-        // cursor hecho en el mismo tick — devolviendo el item original del slot al cursor
-        // (bug de duplicacion real: terminabas con el slot fusionado Y el cursor con una
-        // copia extra del original). La forma correcta, documentada por Paper, es cancelar
-        // el evento y aplicar el cambio de cursor en el tick siguiente via el scheduler.
-        HumanEntity clicker = event.getWhoClicked();
-        ItemStack newCursor = merged[1];
-        Bukkit.getScheduler().runTask(plugin, () -> clicker.setItemOnCursor(newCursor));
+        // IMPORTANTE: usar event.getView().setCursor(...) directamente (event.setCursor()
+        // delega ahi mismo pero esta deprecado) — exactamente el mismo mecanismo que
+        // setCurrentItem usa para el slot via InventoryView#setItem — NO
+        // HumanEntity#setItemOnCursor().
+        // Ese ultimo escribe el cursor del jugador por otra via (NMS directo) que NO
+        // actualiza el estado que trackea el InventoryView; cuando Bukkit resincroniza el
+        // cliente al terminar de procesar el click, usa el cursor trackeado por la View, asi
+        // que setItemOnCursor() quedaba pisado (bug de duplicacion real: el slot fusionaba
+        // bien pero el cursor volvia a mostrar una copia extra del item original).
+        // Diferirlo un tick via scheduler (el intento anterior) tampoco alcanzaba: dos
+        // clicks rapidos podian procesarse ambos ANTES de que la tarea diferida del primero
+        // corriera, asi que el segundo click leia un cursor todavia "viejo" y fusionaba de
+        // nuevo — la misma duplicacion, solo que por una carrera distinta. Al ser sincronico
+        // y usar el mismo mecanismo que ya funciona para el slot, ninguno de los dos
+        // problemas aplica.
+        event.getView().setCursor(merged[1]);
     }
 
     /**
